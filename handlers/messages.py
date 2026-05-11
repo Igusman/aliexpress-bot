@@ -18,7 +18,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", {
         "page_no": 1,
-        "page_size": 100,
+        "page_size": 20,
         "keywords": translated_text
     })
 
@@ -36,10 +36,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p["__rate"] = float(rate.replace("%", ""))
             except (ValueError, AttributeError):
                 p["__rate"] = 0.0
+            # Get purchase/trade count
+            p["__review_count"] = int(p.get("review_count") or p.get("trade_count") or 0)
             p["__title"] = title
             filtered.append(p)
 
-    filtered.sort(key=lambda x: -x.get("__rate", 0.0))
+    # Sort by rating (desc) and then by review count (desc)
+    filtered.sort(key=lambda x: (-x.get("__rate", 0.0), -x.get("__review_count", 0)))
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         filtered = products[:3]
@@ -59,7 +62,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
-            f"⭐ דירוג: {rate}\n"
+            f"⭐ דירוג: {rate}% | 🛒 קניות: {p.get('__review_count', 0)}\n"
             f"🔗 <a href=\"{short_link}\">קישור למוצר</a>"
         )
         captions.append(caption)
