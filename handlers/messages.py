@@ -41,16 +41,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p["__rate"] = float(rate.replace("%", ""))
             except (ValueError, AttributeError):
                 p["__rate"] = 0.0
-            # Get purchase/trade count - try multiple possible field names
-            p["__review_count"] = int(p.get("review_count") or p.get("trade_count") or p.get("sales") or p.get("order_count") or p.get("buyer_counts") or 0)
+            # Get both review_count and trade_count
+            p["__review_count"] = int(p.get("review_count") or 0)
+            p["__trade_count"] = int(p.get("trade_count") or 0)
+            # Use the higher one for sorting
+            p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
             p["__title"] = title
             filtered.append(p)
 
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         filtered = products[:3]
-    # Sort by review count (purchase count) first, then by rating
-    filtered.sort(key=lambda x: (-x.get("__review_count", 0), -x.get("__rate", 0.0)))
+    # Sort by total sales first, then by rating
+    filtered.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
 
     media_group = []
     captions = []
@@ -67,7 +70,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
-            f"⭐ דירוג: {rate}% | 🛒 קניות: {p.get('__review_count', 0)}\n"
+            f"⭐ דירוג: {rate}% | 📦 ביקורות: {p.get('__review_count', 0)} | 🛍️ עסקאות: {p.get('__trade_count', 0)}\n"
             f"🔗 <a href=\"{short_link}\">קישור למוצר</a>"
         )
         captions.append(caption)
