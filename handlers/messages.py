@@ -1,4 +1,5 @@
 import time
+import json
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english, translate_to_hebrew
@@ -27,27 +28,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ לא נמצאו מוצרים.")
         return
 
+    # DEBUG: Print first 2 complete products as JSON
+    print("\n" + "="*100)
+    print("🔍 ALIEXPRESS API RESPONSE - First 2 Products (Complete JSON):")
+    print("="*100)
+    for idx, p in enumerate(products[:2]):
+        print(f"\n📦 Product {idx + 1}:")
+        print(json.dumps(p, indent=2, ensure_ascii=False))
+    print("\n" + "="*100 + "\n")
+
     filtered = []
     for p in products:
         title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
-        
-        # DEBUG: Print all available fields to find purchase count
-        print(f"\n🔍 Product fields: {list(p.keys())}")
-        print(f"Sample values: review_count={p.get('review_count')}, trade_count={p.get('trade_count')}, sales={p.get('sales')}, buyer_counts={p.get('buyer_counts')}, order_count={p.get('order_count')}")
-        
-        if match_search_words(title, keyword_words):
-            rate = p.get("evaluate_rate") or "0%"
-            try:
-                p["__rate"] = float(rate.replace("%", ""))
-            except (ValueError, AttributeError):
-                p["__rate"] = 0.0
-            # Get both review_count and trade_count
-            p["__review_count"] = int(p.get("review_count") or 0)
-            p["__trade_count"] = int(p.get("trade_count") or 0)
-            # Use the higher one for sorting
-            p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
-            p["__title"] = title
-            filtered.append(p)
 
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
