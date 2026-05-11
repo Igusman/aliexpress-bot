@@ -1,11 +1,21 @@
 import time
-import json
+import re
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english, translate_to_hebrew
 from services.aliexpress_api import call_aliexpress_sync_api, find_products_in_response
 from services.logging import log_search
 from services.utils import tokenize, match_search_words, shorten_url
+
+
+def parse_count(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    cleaned = re.sub(r"[^0-9]", "", str(value))
+    return int(cleaned) if cleaned else 0
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
@@ -15,7 +25,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     translated_text = await translate_to_english(text) if is_hebrew(text) else text
     keyword_words = tokenize(translated_text)
-    log_search(text, translated_text)
 
     data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", {
         "page_no": 1,
@@ -23,27 +32,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keywords": translated_text
     })
 
+    # Keep a full per-search log (original query + translation + raw API response)
+    log_search(text, translated_text, data)
+
     products = find_products_in_response(data)
     if not products:
         await update.message.reply_text("❌ לא נמצאו מוצרים.")
         return
 
-    # DEBUG: Print first 2 complete products as JSON
-    print("\n" + "="*100)
-    print("🔍 ALIEXPRESS API RESPONSE - First 2 Products (Complete JSON):")
-    print("="*100)
-    for idx, p in enumerate(products[:2]):
-        print(f"\n📦 Product {idx + 1}:")
-        print(json.dumps(p, indent=2, ensure_ascii=False))
-    print("\n" + "="*100 + "\n")
-
     filtered = []
     for p in products:
         title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+        if not match_search_words(title, keyword_words):
+            continue
+
+        rate = p.get("evaluate_rate") or "0%"
+        try:
+            p["__rate"] = float(str(rate).replace("%", ""))
+        except (ValueError, AttributeError):
+            p["__rate"] = 0.0
+
+        p["__review_count"] = parse_count(p.get("review_count"))
+        p["__trade_count"] = parse_count(p.get("trade_count"))
+        p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
+        p["__title"] = title
+        filtered.append(p)
 
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         filtered = products[:3]
+
+        for p in filtered:
+            rate = p.get("evaluate_rate") or "0%"
+            try:
+                p["__rate"] = float(str(rate).replace("%", ""))
+            except (ValueError, AttributeError):
+                p["__rate"] = 0.0
+
+            p["__review_count"] = parse_count(p.get("review_count"))
+            p["__trade_count"] = parse_count(p.get("trade_count"))
+            p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
+            p["__title"] = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+
     # Sort by total sales first, then by rating
     filtered.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
 
