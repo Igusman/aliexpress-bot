@@ -41,11 +41,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p["__title"] = title
             filtered.append(p)
 
-    # Sort by rating (desc) and then by review count (desc)
-    filtered.sort(key=lambda x: (-x.get("__rate", 0.0), -x.get("__review_count", 0)))
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         filtered = products[:3]
+    # Sort by review count (purchase count) first, then by rating
+    filtered.sort(key=lambda x: (-x.get("__review_count", 0), -x.get("__rate", 0.0)))
 
     media_group = []
     captions = []
