@@ -30,14 +30,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filtered = []
     for p in products:
         title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+        
+        # DEBUG: Print all available fields to find purchase count
+        print(f"\n🔍 Product fields: {list(p.keys())}")
+        print(f"Sample values: review_count={p.get('review_count')}, trade_count={p.get('trade_count')}, sales={p.get('sales')}, buyer_counts={p.get('buyer_counts')}, order_count={p.get('order_count')}")
+        
         if match_search_words(title, keyword_words):
             rate = p.get("evaluate_rate") or "0%"
             try:
                 p["__rate"] = float(rate.replace("%", ""))
             except (ValueError, AttributeError):
                 p["__rate"] = 0.0
-            # Get purchase/trade count
-            p["__review_count"] = int(p.get("review_count") or p.get("trade_count") or 0)
+            # Get purchase/trade count - try multiple possible field names
+            p["__review_count"] = int(p.get("review_count") or p.get("trade_count") or p.get("sales") or p.get("order_count") or p.get("buyer_counts") or 0)
             p["__title"] = title
             filtered.append(p)
 
