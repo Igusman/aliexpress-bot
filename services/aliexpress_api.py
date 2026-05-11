@@ -26,7 +26,8 @@ def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
     resp = requests.get("https://api-sg.aliexpress.com/sync", params=params)
     try:
         return resp.json()
-    except:
+    except Exception as e:
+        print(f"AliExpress API JSON parse error: {e}")
         return {}
 
 async def call_aliexpress_sync_api(method: str, extra_params: dict):

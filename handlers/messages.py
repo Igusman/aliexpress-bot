@@ -18,7 +18,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", {
         "page_no": 1,
-        "page_size": 50,
+        "page_size": 100,
         "keywords": translated_text
     })
 
@@ -34,7 +34,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rate = p.get("evaluate_rate") or "0%"
             try:
                 p["__rate"] = float(rate.replace("%", ""))
-            except:
+            except (ValueError, AttributeError):
                 p["__rate"] = 0.0
             p["__title"] = title
             filtered.append(p)
