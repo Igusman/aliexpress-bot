@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 PROVIDER_ORDER = ["mymemory", "libre", "deepl", "microsoft"]
+PREFERRED_PROVIDER = "mymemory"
 
 
 def _normalize_text(value: str) -> str:
@@ -22,13 +23,36 @@ def is_hebrew(text: str) -> bool:
 
 
 def _translate_mymemory(text: str, source: str, target: str) -> str:
-    return MyMemoryTranslator(source=source, target=target).translate(text)
+    lang_map = {
+        "he": "he-IL",
+        "en": "en-US",
+    }
+    source_code = lang_map.get(source, source)
+    target_code = lang_map.get(target, target)
+    return MyMemoryTranslator(source=source_code, target=target_code).translate(text)
 
 
 def _translate_libre(text: str, source: str, target: str) -> str:
+    lang_map = {
+        "he": "he",
+        "en": "en",
+        "auto": "auto"
+    }
+    source_code = lang_map.get(source, source)
+    target_code = lang_map.get(target, target)
+    
     base_url = os.getenv("LIBRETRANSLATE_URL", "https://libretranslate.de")
-    api_key = os.getenv("LIBRETRANSLATE_API_KEY")
-    return LibreTranslator(source=source, target=target, base_url=base_url, api_key=api_key).translate(text)
+    api_key = os.getenv("LIBRETRANSLATE_API_KEY", "")
+    
+    kwargs = {
+        "source": source_code,
+        "target": target_code,
+        "base_url": base_url,
+    }
+    if api_key:
+        kwargs["api_key"] = api_key
+    
+    return LibreTranslator(**kwargs).translate(text)
 
 
 def _translate_deepl(text: str, source: str, target: str) -> str:
@@ -36,7 +60,7 @@ def _translate_deepl(text: str, source: str, target: str) -> str:
     if not api_key:
         raise ValueError("DEEPL_API_KEY is not set")
 
-    source_map = {"he": "HE", "en": "EN"}
+    source_map = {"he": "HE", "en": "EN", "auto": "auto"}
     target_map = {"he": "HE", "en": "EN-US"}
 
     return DeeplTranslator(
@@ -94,7 +118,7 @@ async def compare_translations(text: str, source: str = "he", target: str = "en"
 
 
 def _pick_provider(comparison: Dict[str, Dict[str, str]]) -> Tuple[str, str]:
-    preferred = os.getenv("TRANSLATION_PROVIDER", "mymemory").strip().lower()
+    preferred = os.getenv("TRANSLATION_PROVIDER", PREFERRED_PROVIDER).strip().lower()
     ordered = [preferred] + [p for p in PROVIDER_ORDER if p != preferred]
 
     for provider in ordered:
