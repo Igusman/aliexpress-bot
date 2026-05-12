@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-SEARCH_LOG_FILE = "search.log"
+SEARCH_LOG_FILE = "search_log.txt"
 
 
 def find_products_in_response(data):
@@ -40,13 +41,21 @@ def extract_key_data(api_data: dict, limit: int = 5):
     }
 
 
-def log_search(original_text: str, translated_text: str, api_data: dict):
+def log_search(
+    original_text: str,
+    translated_text: str,
+    api_data: dict,
+    translation_provider: str = "unknown",
+    translation_comparison: Optional[dict] = None,
+):
     search_file = Path(SEARCH_LOG_FILE)
     key_data = extract_key_data(api_data)
     entry = {
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "original_query": original_text,
         "translated_query": translated_text,
+        "translation_provider": translation_provider,
+        "translation_comparison": translation_comparison or {},
         "key_data": key_data,
         "aliexpress_data": api_data,
     }
@@ -60,5 +69,7 @@ def log_search(original_text: str, translated_text: str, api_data: dict):
         "timestamp": entry["timestamp"],
         "original_query": original_text,
         "translated_query": translated_text,
+        "translation_provider": translation_provider,
+        "translation_comparison": translation_comparison or {},
         "key_data": key_data,
     }, ensure_ascii=False))

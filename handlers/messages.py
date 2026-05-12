@@ -2,7 +2,7 @@ import time
 import re
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
-from services.translation import is_hebrew, translate_to_english, translate_to_hebrew
+from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
 from services.aliexpress_api import call_aliexpress_sync_api, find_products_in_response
 from services.logging import log_search
 from services.utils import tokenize, match_search_words, shorten_url
@@ -23,7 +23,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     await update.message.reply_text(f"🔍 מחפש את '{text}' באלי אקספרס...")
 
-    translated_text = await translate_to_english(text) if is_hebrew(text) else text
+    translation_provider = "original"
+    translation_comparison = {}
+    if is_hebrew(text):
+        translated_text, translation_provider, translation_comparison = await translate_to_english_with_debug(text)
+    else:
+        translated_text = text
+
     keyword_words = tokenize(translated_text)
 
     data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", {
@@ -33,7 +39,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
 
     # Keep a full per-search log (original query + translation + raw API response)
-    log_search(text, translated_text, data)
+    log_search(
+        text,
+        translated_text,
+        data,
+        translation_provider=translation_provider,
+        translation_comparison=translation_comparison,
+    )
 
     products = find_products_in_response(data)
     if not products:
