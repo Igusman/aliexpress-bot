@@ -61,7 +61,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         p["__trade_count"] = pick_best_count(
             p,
-            ["trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
+            ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
         )
         p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
         p["__title"] = title
@@ -79,7 +79,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             p["__trade_count"] = pick_best_count(
                 p,
-                ["trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
+                ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
             )
             p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
             p["__title"] = p.get("title") or p.get("product_title") or p.get("productTitle", "")
@@ -99,10 +99,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rate = p.get("__rate", "N/A")
         translated_title = await translate_to_hebrew(title)
 
+        review_count = p.get('__review_count', 0)
+        trade_count = p.get('__trade_count', 0)
+        rate_display = f"{rate}%" if rate else "N/A"
+        reviews_display = str(review_count) if review_count else "N/A"
+        trades_display = str(trade_count) if trade_count else "N/A"
+
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
-            f"⭐ דירוג: {rate}% | 📦 ביקורות: {p.get('__review_count', 0)} | 🛍️ עסקאות: {p.get('__trade_count', 0)}\n"
+            f"⭐ דירוג: {rate_display} | 📦 ביקורות: {reviews_display} | 🛍️ עסקאות: {trades_display}\n"
             f"🔗 <a href=\"{short_link}\">קישור למוצר</a>"
         )
         captions.append(caption)

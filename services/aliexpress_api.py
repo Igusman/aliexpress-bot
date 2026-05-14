@@ -9,14 +9,46 @@ ALI_KEY = os.getenv("ALIEXPRESS_APP_KEY")
 ALI_SECRET = os.getenv("ALIEXPRESS_APP_SECRET")
 
 
+# Explicitly request all useful fields from the affiliate product query API,
+# including lastest_volume which is the only sales-count field the API returns.
+_PRODUCT_FIELDS = ",".join([
+    "product_id",
+    "product_title",
+    "product_main_image_url",
+    "product_small_image_urls",
+    "product_detail_url",
+    "promotion_link",
+    "target_sale_price",
+    "target_sale_price_currency",
+    "target_original_price",
+    "target_original_price_currency",
+    "sale_price",
+    "original_price_currency",
+    "app_sale_price",
+    "app_sale_price_currency",
+    "evaluate_rate",
+    "lastest_volume",
+    "commission_rate",
+    "discount",
+    "shop_id",
+    "shop_url",
+    "first_level_category_id",
+    "first_level_category_name",
+    "second_level_category_id",
+    "second_level_category_name",
+    "platform_product_type",
+])
+
+
 def build_product_query_params(keywords: str, page_no: int = 1, page_size: int = 20) -> dict:
     params = {
         "page_no": page_no,
         "page_size": page_size,
         "keywords": keywords,
+        "fields": _PRODUCT_FIELDS,
     }
 
-    # Locale params usually help with better coverage for rating/order fields.
+    # Locale params help with coverage for rating/price fields.
     target_language = os.getenv("ALI_TARGET_LANGUAGE", "EN")
     target_currency = os.getenv("ALI_TARGET_CURRENCY", "USD")
     ship_to_country = os.getenv("ALI_SHIP_TO_COUNTRY", "US")
