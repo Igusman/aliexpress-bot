@@ -1,21 +1,16 @@
 import time
-import re
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
-from services.aliexpress_api import call_aliexpress_sync_api, find_products_in_response
+from services.aliexpress_api import (
+    build_product_query_params,
+    call_aliexpress_sync_api,
+    find_products_in_response,
+    pick_best_count,
+    pick_best_rate,
+)
 from services.logging import log_search
 from services.utils import tokenize, match_search_words, shorten_url
-
-
-def parse_count(value) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-
-    cleaned = re.sub(r"[^0-9]", "", str(value))
-    return int(cleaned) if cleaned else 0
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
@@ -32,11 +27,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyword_words = tokenize(translated_text)
 
-    data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", {
-        "page_no": 1,
-        "page_size": 20,
-        "keywords": translated_text
-    })
+    query_params = build_product_query_params(
+        keywords=translated_text,
+        page_no=1,
+        page_size=20,
+    )
+    data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
 
     # Keep a full per-search log (original query + translation + raw API response)
     log_search(
@@ -58,14 +54,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match_search_words(title, keyword_words):
             continue
 
-        rate = p.get("evaluate_rate") or "0%"
-        try:
-            p["__rate"] = float(str(rate).replace("%", ""))
-        except (ValueError, AttributeError):
-            p["__rate"] = 0.0
-
-        p["__review_count"] = parse_count(p.get("review_count"))
-        p["__trade_count"] = parse_count(p.get("trade_count"))
+        p["__rate"] = pick_best_rate(p)
+        p["__review_count"] = pick_best_count(
+            p,
+            ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"],
+        )
+        p["__trade_count"] = pick_best_count(
+            p,
+            ["trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
+        )
         p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
         p["__title"] = title
         filtered.append(p)
@@ -75,14 +72,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filtered = products[:3]
 
         for p in filtered:
-            rate = p.get("evaluate_rate") or "0%"
-            try:
-                p["__rate"] = float(str(rate).replace("%", ""))
-            except (ValueError, AttributeError):
-                p["__rate"] = 0.0
-
-            p["__review_count"] = parse_count(p.get("review_count"))
-            p["__trade_count"] = parse_count(p.get("trade_count"))
+            p["__rate"] = pick_best_rate(p)
+            p["__review_count"] = pick_best_count(
+                p,
+                ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"],
+            )
+            p["__trade_count"] = pick_best_count(
+                p,
+                ["trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
+            )
             p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
             p["__title"] = p.get("title") or p.get("product_title") or p.get("productTitle", "")
 

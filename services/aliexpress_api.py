@@ -3,9 +3,81 @@ import hashlib
 import os
 import requests
 import asyncio
+import re
 
 ALI_KEY = os.getenv("ALIEXPRESS_APP_KEY")
 ALI_SECRET = os.getenv("ALIEXPRESS_APP_SECRET")
+
+
+def build_product_query_params(keywords: str, page_no: int = 1, page_size: int = 20) -> dict:
+    params = {
+        "page_no": page_no,
+        "page_size": page_size,
+        "keywords": keywords,
+    }
+
+    # Locale params usually help with better coverage for rating/order fields.
+    target_language = os.getenv("ALI_TARGET_LANGUAGE", "EN")
+    target_currency = os.getenv("ALI_TARGET_CURRENCY", "USD")
+    ship_to_country = os.getenv("ALI_SHIP_TO_COUNTRY", "US")
+
+    if target_language:
+        params["target_language"] = target_language
+    if target_currency:
+        params["target_currency"] = target_currency
+    if ship_to_country:
+        params["ship_to_country"] = ship_to_country
+
+    sort_by = os.getenv("ALI_SORT_BY", "")
+    if sort_by:
+        params["sort"] = sort_by
+
+    return params
+
+
+def parse_metric_count(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    cleaned = re.sub(r"[^0-9]", "", str(value))
+    return int(cleaned) if cleaned else 0
+
+
+def pick_best_count(product: dict, keys: list[str]) -> int:
+    for key in keys:
+        count = parse_metric_count(product.get(key))
+        if count > 0:
+            return count
+    return 0
+
+
+def pick_best_rate(product: dict) -> float:
+    candidates = [
+        product.get("evaluate_rate"),
+        product.get("rating"),
+        product.get("avg_rating"),
+        product.get("score"),
+    ]
+
+    for value in candidates:
+        if value is None:
+            continue
+        text = str(value).strip()
+        try:
+            if text.endswith("%"):
+                return float(text.replace("%", ""))
+
+            # Some APIs return 0-5 stars. Convert to percent for consistent sorting/display.
+            score = float(text)
+            if 0 <= score <= 5:
+                return round((score / 5.0) * 100, 2)
+            return score
+        except (ValueError, TypeError):
+            continue
+
+    return 0.0
 
 def generate_signature(params: dict, app_secret: str) -> str:
     sorted_params = ''.join([f"{k}{v}" for k, v in sorted(params.items())])
@@ -13,6 +85,11 @@ def generate_signature(params: dict, app_secret: str) -> str:
     return hashlib.md5(base_string.encode()).hexdigest().upper()
 
 def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
+    if not ALI_KEY or not ALI_SECRET:
+        return {
+            "error": "ALIEXPRESS_APP_KEY or ALIEXPRESS_APP_SECRET is not set"
+        }
+
     params = {
         "app_key": ALI_KEY,
         "method": method,

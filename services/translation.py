@@ -1,18 +1,14 @@
 import os
 from typing import Dict, Tuple
 
-from deep_translator import (
-    DeeplTranslator,
-    LibreTranslator,
-    MicrosoftTranslator,
-    MyMemoryTranslator,
-)
+import requests
+from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PROVIDER_ORDER = ["mymemory", "libre", "deepl", "microsoft"]
-PREFERRED_PROVIDER = "mymemory"
+PROVIDER_ORDER = ["google", "chatgpt"]
+PREFERRED_PROVIDER = "google"
 
 
 def _normalize_text(value: str) -> str:
@@ -22,80 +18,59 @@ def is_hebrew(text: str) -> bool:
     return any('\u0590' <= c <= '\u05EA' for c in text)
 
 
-def _translate_mymemory(text: str, source: str, target: str) -> str:
-    lang_map = {
-        "he": "he-IL",
-        "en": "en-US",
-    }
-    source_code = lang_map.get(source, source)
-    target_code = lang_map.get(target, target)
-    return MyMemoryTranslator(source=source_code, target=target_code).translate(text)
+def _translate_google(text: str, source: str, target: str) -> str:
+    source_code = "auto" if source == "auto" else source
+    return GoogleTranslator(source=source_code, target=target).translate(text)
 
 
-def _translate_libre(text: str, source: str, target: str) -> str:
-    lang_map = {
-        "he": "he",
-        "en": "en",
-        "auto": "auto"
-    }
-    source_code = lang_map.get(source, source)
-    target_code = lang_map.get(target, target)
-    
-    base_url = os.getenv("LIBRETRANSLATE_URL", "https://libretranslate.de")
-    api_key = os.getenv("LIBRETRANSLATE_API_KEY", "")
-    
-    kwargs = {
-        "source": source_code,
-        "target": target_code,
-        "base_url": base_url,
-    }
-    if api_key:
-        kwargs["api_key"] = api_key
-    
-    return LibreTranslator(**kwargs).translate(text)
-
-
-def _translate_deepl(text: str, source: str, target: str) -> str:
-    api_key = os.getenv("DEEPL_API_KEY")
+def _translate_chatgpt(text: str, source: str, target: str) -> str:
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("DEEPL_API_KEY is not set")
+        raise ValueError("OPENAI_API_KEY is not set")
 
-    source_map = {"he": "HE", "en": "EN", "auto": "auto"}
-    target_map = {"he": "HE", "en": "EN-US"}
+    model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    lang_name = {"he": "Hebrew", "en": "English", "auto": "detected language"}
+    source_name = lang_name.get(source, source)
+    target_name = lang_name.get(target, target)
 
-    return DeeplTranslator(
-        api_key=api_key,
-        source=source_map.get(source, source.upper()),
-        target=target_map.get(target, target.upper()),
-    ).translate(text)
-
-
-def _translate_microsoft(text: str, source: str, target: str) -> str:
-    api_key = os.getenv("MICROSOFT_TRANSLATOR_KEY")
-    if not api_key:
-        raise ValueError("MICROSOFT_TRANSLATOR_KEY is not set")
-
-    region = os.getenv("MICROSOFT_TRANSLATOR_REGION")
-    kwargs = {
-        "api_key": api_key,
-        "source": source,
-        "target": target,
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
     }
-    if region:
-        kwargs["region"] = region
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a translation engine. Return only the translated text without quotes or explanations."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Translate from {source_name} to {target_name}: {text}",
+            },
+        ],
+    }
 
-    return MicrosoftTranslator(**kwargs).translate(text)
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
+    data = response.json()
+    translated = data["choices"][0]["message"]["content"]
+    return _normalize_text(translated)
 
 
 def _translate_with_provider(provider: str, text: str, source: str, target: str) -> str:
-    if provider == "mymemory":
-        return _translate_mymemory(text, source, target)
-    if provider == "libre":
-        return _translate_libre(text, source, target)
-    if provider == "deepl":
-        return _translate_deepl(text, source, target)
-    if provider == "microsoft":
-        return _translate_microsoft(text, source, target)
+    if provider == "google":
+        return _translate_google(text, source, target)
+    if provider == "chatgpt":
+        return _translate_chatgpt(text, source, target)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
