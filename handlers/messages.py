@@ -11,7 +11,7 @@ from services.aliexpress_api import (
     pick_best_rate,
 )
 from services.logging import log_search
-from services.utils import tokenize, match_search_words, shorten_url
+from services.utils import tokenize, match_search_words, search_relevance_score, shorten_url
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
@@ -55,6 +55,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match_search_words(title, keyword_words):
             continue
 
+        p["__relevance"] = search_relevance_score(title, keyword_words)
         p["__rate"] = pick_best_rate(p)
         p["__review_count"] = pick_best_count(
             p,
@@ -70,9 +71,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not filtered:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
-        filtered = products[:3]
-
-        for p in filtered:
+        fallback_ranked = []
+        for p in products:
+            title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+            p["__relevance"] = search_relevance_score(title, keyword_words)
             p["__rate"] = pick_best_rate(p)
             p["__review_count"] = pick_best_count(
                 p,
@@ -83,7 +85,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
             )
             p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
-            p["__title"] = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+            p["__title"] = title
+            fallback_ranked.append(p)
+
+        fallback_ranked.sort(key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0)))
+        filtered = fallback_ranked[:10]
 
     # Enrich all current candidates first, then rank with the enriched metrics.
     # This avoids picking an arbitrary top-5 when initial API response has zeros/nulls.
@@ -91,6 +97,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Re-apply metric extraction after enrichment
     for p in enriched_candidates:
+        title = p.get("__title") or p.get("title") or p.get("product_title") or p.get("productTitle", "")
+        p["__relevance"] = search_relevance_score(title, keyword_words)
         p["__review_count"] = pick_best_count(
             p, ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
         )
@@ -101,8 +109,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p["__total_sales"] = max(p.get("__review_count", 0), p.get("__trade_count", 0))
         p["__rate"] = pick_best_rate(p)
 
-    # Sort by total sales first, then by rating
-    enriched_candidates.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
+    # Sort by relevance first, then by sales and rating.
+    enriched_candidates.sort(
+        key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0))
+    )
     top5 = enriched_candidates[:5]
 
     media_group = []
