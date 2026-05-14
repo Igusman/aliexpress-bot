@@ -85,14 +85,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
             p["__title"] = p.get("title") or p.get("product_title") or p.get("productTitle", "")
 
-    # Sort by total sales first, then by rating
-    filtered.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
+    # Enrich all current candidates first, then rank with the enriched metrics.
+    # This avoids picking an arbitrary top-5 when initial API response has zeros/nulls.
+    enriched_candidates = await enrich_products_with_details(filtered)
 
-    # Enrich top-5 candidates with detail API to fill missing review/trade data
-    top5 = filtered[:5]
-    top5 = await enrich_products_with_details(top5)
     # Re-apply metric extraction after enrichment
-    for p in top5:
+    for p in enriched_candidates:
         p["__review_count"] = pick_best_count(
             p, ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
         )
@@ -100,7 +98,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p, ["lastest_volume", "trade_count", "orders", "order_count",
                 "sale_count", "sold_count", "volume"]
         )
+        p["__total_sales"] = max(p.get("__review_count", 0), p.get("__trade_count", 0))
         p["__rate"] = pick_best_rate(p)
+
+    # Sort by total sales first, then by rating
+    enriched_candidates.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
+    top5 = enriched_candidates[:5]
 
     media_group = []
     captions = []
