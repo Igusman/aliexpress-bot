@@ -18,7 +18,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["👟 נעליים"],
         ["⌚ שעון חכם"],
         ["📱 אקססוריז טלפון"],
-        ["🎮 ألعاب"],
+        ["🎮 משחקים"],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     

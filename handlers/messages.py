@@ -133,7 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if rate:
             metrics.append(f"⭐ דירוג: {rate}%")
         if trade_count:
-            metrics.append(f"🛍️ הזמנות (30 יום): {trade_count}")
+            metrics.append(f"🛍️ כמות הזמנות: {trade_count}")
         metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
         caption = (
