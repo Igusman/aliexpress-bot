@@ -45,7 +45,6 @@ def build_product_query_params(keywords: str, page_no: int = 1, page_size: int =
         "page_no": page_no,
         "page_size": page_size,
         "keywords": keywords,
-        "fields": _PRODUCT_FIELDS,
     }
 
     # Locale params help with coverage for rating/price fields.

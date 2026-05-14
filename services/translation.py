@@ -18,8 +18,17 @@ def is_hebrew(text: str) -> bool:
     return any('\u0590' <= c <= '\u05EA' for c in text)
 
 
+# Google Translate uses 'iw' for Hebrew (legacy ISO code), not 'he'
+_GOOGLE_LANG_MAP = {
+    "he": "iw",
+    "en": "en",
+    "auto": "auto",
+}
+
+
 def _translate_google(text: str, source: str, target: str) -> str:
-    source_code = "auto" if source == "auto" else source
+    source_code = _GOOGLE_LANG_MAP.get(source, source)
+    target_code = _GOOGLE_LANG_MAP.get(target, target)
     return GoogleTranslator(source=source_code, target=target).translate(text)
 
 
