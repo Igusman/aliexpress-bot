@@ -143,6 +143,94 @@ async def call_aliexpress_sync_api(method: str, extra_params: dict):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, call_aliexpress_sync_api_sync, method, extra_params)
 
+
+_DETAIL_FIELDS = ",".join([
+    "product_id",
+    "evaluate_rate",
+    "lastest_volume",
+    "review_count",
+    "trade_count",
+    "average_star",
+    "order_count",
+    "sale_count",
+    "product_title",
+    "target_sale_price",
+    "target_original_price",
+    "product_main_image_url",
+    "promotion_link",
+])
+
+
+def _fetch_product_details_sync(product_ids: list[str]) -> dict[str, dict]:
+    """Call aliexpress.affiliate.productdetail.get for a batch of product IDs.
+    Returns a mapping of product_id -> detail dict."""
+    if not ALI_KEY or not ALI_SECRET or not product_ids:
+        return {}
+
+    params = {
+        "app_key": ALI_KEY,
+        "method": "aliexpress.affiliate.productdetail.get",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        "format": "json",
+        "v": "2.0",
+        "sign_method": "md5",
+        "product_ids": ",".join(product_ids),
+        "fields": _DETAIL_FIELDS,
+        "target_currency": os.getenv("ALI_TARGET_CURRENCY", "USD"),
+        "target_language": os.getenv("ALI_TARGET_LANGUAGE", "EN"),
+    }
+    params["sign"] = generate_signature(params, ALI_SECRET)  # type: ignore[arg-type]
+
+    try:
+        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=10)
+        data = resp.json()
+    except Exception as e:
+        print(f"AliExpress detail API error: {e}")
+        return {}
+
+    # Navigate into the response to find the product list
+    products = find_products_in_response(data) or []
+    result: dict[str, dict] = {}
+    for p in products:
+        pid = str(p.get("product_id", ""))
+        if pid:
+            result[pid] = p
+    return result
+
+
+async def enrich_products_with_details(products: list[dict]) -> list[dict]:
+    """Fetch detail data for products that are missing review/trade counts
+    and merge the extra fields into the existing product dicts."""
+    missing_ids = [
+        str(p.get("product_id", ""))
+        for p in products
+        if p.get("product_id")
+        and pick_best_count(p, ["lastest_volume", "trade_count", "orders", "order_count",
+                                 "sale_count", "sold_count", "volume"]) == 0
+    ]
+
+    if not missing_ids:
+        return products
+
+    loop = asyncio.get_running_loop()
+    details = await loop.run_in_executor(None, _fetch_product_details_sync, missing_ids)
+
+    if not details:
+        return products
+
+    for p in products:
+        pid = str(p.get("product_id", ""))
+        if pid in details:
+            detail = details[pid]
+            # Only overwrite fields that are currently None/missing
+            for field in ["evaluate_rate", "lastest_volume", "review_count",
+                          "trade_count", "average_star", "order_count", "sale_count"]:
+                if p.get(field) is None and detail.get(field) is not None:
+                    p[field] = detail[field]
+
+    return products
+
+
 def find_products_in_response(data):
     if isinstance(data, list): return data
     if isinstance(data, dict):

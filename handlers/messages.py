@@ -5,6 +5,7 @@ from services.translation import is_hebrew, translate_to_english_with_debug, tra
 from services.aliexpress_api import (
     build_product_query_params,
     call_aliexpress_sync_api,
+    enrich_products_with_details,
     find_products_in_response,
     pick_best_count,
     pick_best_rate,
@@ -87,9 +88,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Sort by total sales first, then by rating
     filtered.sort(key=lambda x: (-x.get("__total_sales", 0), -x.get("__rate", 0.0)))
 
+    # Enrich top-5 candidates with detail API to fill missing review/trade data
+    top5 = filtered[:5]
+    top5 = await enrich_products_with_details(top5)
+    # Re-apply metric extraction after enrichment
+    for p in top5:
+        p["__review_count"] = pick_best_count(
+            p, ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
+        )
+        p["__trade_count"] = pick_best_count(
+            p, ["lastest_volume", "trade_count", "orders", "order_count",
+                "sale_count", "sold_count", "volume"]
+        )
+        p["__rate"] = pick_best_rate(p)
+
     media_group = []
     captions = []
-    for p in filtered[:5]:
+    for p in top5:
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
         link = p.get("promotion_link") or "N/A"
