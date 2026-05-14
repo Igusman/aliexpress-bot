@@ -114,16 +114,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rate = p.get("__rate", "N/A")
         translated_title = await translate_to_hebrew(title)
 
-        review_count = p.get('__review_count', 0)
         trade_count = p.get('__trade_count', 0)
-        rate_display = f"{rate}%" if rate else "N/A"
-        reviews_display = str(review_count) if review_count else "N/A"
-        trades_display = str(trade_count) if trade_count else "N/A"
+
+        metrics = []
+        if rate:
+            metrics.append(f"⭐ דירוג: {rate}%")
+        if trade_count:
+            metrics.append(f"🛍️ הזמנות (30 יום): {trade_count}")
+        metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
-            f"⭐ דירוג: {rate_display} | 📦 ביקורות: {reviews_display} | 🛍️ עסקאות: {trades_display}\n"
+            f"{metrics_line}\n"
             f"🔗 <a href=\"{short_link}\">קישור למוצר</a>"
         )
         captions.append(caption)
