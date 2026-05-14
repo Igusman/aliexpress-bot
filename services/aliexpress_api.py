@@ -89,7 +89,12 @@ def build_product_smartmatch_params(
     )
 
 
-def build_hotproduct_query_params(page_no: int = 1, page_size: int = 20) -> dict:
+def build_hotproduct_query_params(
+    page_no: int = 1,
+    page_size: int = 20,
+    category_ids: str | None = None,
+    keywords: str | None = None,
+) -> dict:
     params = {
         "page_no": page_no,
         "page_size": page_size,
@@ -108,6 +113,11 @@ def build_hotproduct_query_params(page_no: int = 1, page_size: int = 20) -> dict
         params["target_currency"] = target_currency
     if ship_to_country:
         params["ship_to_country"] = ship_to_country
+
+    if category_ids:
+        params["category_ids"] = category_ids
+    if keywords:
+        params["keywords"] = keywords
 
     return params
 
@@ -297,8 +307,18 @@ async def compare_search_methods(
     }
 
 
-async def fetch_hot_products(page_no: int = 1, page_size: int = 20) -> tuple[dict, str]:
-    params = build_hotproduct_query_params(page_no=page_no, page_size=page_size)
+async def fetch_hot_products(
+    page_no: int = 1,
+    page_size: int = 20,
+    category_ids: str | None = None,
+    keywords: str | None = None,
+) -> tuple[dict, str]:
+    params = build_hotproduct_query_params(
+        page_no=page_no,
+        page_size=page_size,
+        category_ids=category_ids,
+        keywords=keywords,
+    )
     data = await call_aliexpress_sync_api("aliexpress.affiliate.hotproduct.query", params)
     return data, "aliexpress.affiliate.hotproduct.query"
 

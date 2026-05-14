@@ -40,7 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if hot_products_requested:
         await update.message.reply_text("🔥 מביא לך עכשיו מוצרים חמים מ-AliExpress...")
     elif button_query_config:
-        await update.message.reply_text(f"🔎 מחפש עכשיו לפי קטגוריה: {normalized_text}")
+        await update.message.reply_text(f"🔥 מביא עכשיו מוצרים חמים עבור: {normalized_text}")
     else:
         await update.message.reply_text(f"🔍 מחפש את '{text}' באלי אקספרס...")
 
@@ -53,8 +53,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif button_query_config:
         translated_text = button_query_config["keywords"]
         quick_category_ids = os.getenv(button_query_config["category_env"], "").strip() or None
-        # category filtering is designed around product.query endpoint.
-        force_query = bool(quick_category_ids)
+        # If hot products by category returns nothing, fallback can still use product.query with category filter.
+        force_query = False
     elif is_hebrew(text):
         translated_text, translation_provider, translation_comparison = await translate_to_english_with_debug(text)
     else:
@@ -75,6 +75,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if hot_products_requested:
         data, search_method = await fetch_hot_products(page_no=1, page_size=20)
+    elif button_query_config:
+        data, search_method = await fetch_hot_products(
+            page_no=1,
+            page_size=20,
+            category_ids=quick_category_ids,
+            keywords=translated_text,
+        )
+        hot_button_products = find_products_in_response(data) or []
+        if not hot_button_products:
+            data, search_method = await search_products_with_fallback(
+                keywords=translated_text,
+                page_no=1,
+                page_size=20,
+                category_ids=quick_category_ids,
+                force_query=bool(quick_category_ids),
+            )
     else:
         data, search_method = await search_products_with_fallback(
             keywords=translated_text,
