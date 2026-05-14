@@ -66,6 +66,11 @@ def build_product_query_params(keywords: str, page_no: int = 1, page_size: int =
     return params
 
 
+def build_product_smartmatch_params(keywords: str, page_no: int = 1, page_size: int = 20) -> dict:
+    # Smartmatch shares the same locale/search parameters as product.query.
+    return build_product_query_params(keywords=keywords, page_no=page_no, page_size=page_size)
+
+
 def parse_metric_count(value) -> int:
     if value is None:
         return 0
@@ -141,6 +146,54 @@ def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
 async def call_aliexpress_sync_api(method: str, extra_params: dict):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, call_aliexpress_sync_api_sync, method, extra_params)
+
+
+async def search_products_with_fallback(
+    keywords: str,
+    page_no: int = 1,
+    page_size: int = 20,
+) -> tuple[dict, str]:
+    """Search products using configured strategy.
+
+    Modes:
+    - smartmatch: use smartmatch only
+    - query: use product.query only
+    - hybrid (default): smartmatch first, then product.query fallback
+    """
+    search_mode = os.getenv("ALI_SEARCH_MODE", "hybrid").strip().lower()
+
+    smartmatch_params = build_product_smartmatch_params(
+        keywords=keywords,
+        page_no=page_no,
+        page_size=page_size,
+    )
+    query_params = build_product_query_params(
+        keywords=keywords,
+        page_no=page_no,
+        page_size=page_size,
+    )
+
+    if search_mode == "smartmatch":
+        smartmatch_data = await call_aliexpress_sync_api(
+            "aliexpress.affiliate.product.smartmatch",
+            smartmatch_params,
+        )
+        return smartmatch_data, "aliexpress.affiliate.product.smartmatch"
+
+    if search_mode == "query":
+        query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
+        return query_data, "aliexpress.affiliate.product.query"
+
+    smartmatch_data = await call_aliexpress_sync_api(
+        "aliexpress.affiliate.product.smartmatch",
+        smartmatch_params,
+    )
+    smartmatch_products = find_products_in_response(smartmatch_data) or []
+    if smartmatch_products:
+        return smartmatch_data, "aliexpress.affiliate.product.smartmatch"
+
+    query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
+    return query_data, "aliexpress.affiliate.product.query"
 
 
 _DETAIL_FIELDS = ",".join([

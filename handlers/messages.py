@@ -3,12 +3,11 @@ from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
 from services.aliexpress_api import (
-    build_product_query_params,
-    call_aliexpress_sync_api,
     enrich_products_with_details,
     find_products_in_response,
     pick_best_count,
     pick_best_rate,
+    search_products_with_fallback,
 )
 from services.logging import log_search
 from services.utils import tokenize, match_search_words, search_relevance_score, shorten_url
@@ -28,12 +27,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyword_words = tokenize(translated_text)
 
-    query_params = build_product_query_params(
+    data, search_method = await search_products_with_fallback(
         keywords=translated_text,
         page_no=1,
         page_size=20,
     )
-    data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
+    print(f"ALI_SEARCH_METHOD: {search_method}")
 
     # Keep a full per-search log (original query + translation + raw API response)
     log_search(
