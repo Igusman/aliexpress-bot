@@ -1,9 +1,12 @@
 import time
+import os
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
 from services.aliexpress_api import (
+    compare_search_methods,
     enrich_products_with_details,
+    fetch_hot_products,
     find_products_in_response,
     pick_best_count,
     pick_best_rate,
@@ -12,26 +15,74 @@ from services.aliexpress_api import (
 from services.logging import log_search
 from services.utils import tokenize, match_search_words, search_relevance_score, shorten_url
 
+BUTTON_QUERY_MAP = {
+    "נעליים": {"keywords": "shoes", "category_env": "ALI_CATEGORY_SHOES"},
+    "שעון חכם": {"keywords": "smart watch", "category_env": "ALI_CATEGORY_SMARTWATCH"},
+    "אקססוריז טלפון": {"keywords": "phone accessories", "category_env": "ALI_CATEGORY_PHONE_ACCESSORIES"},
+}
+
+
+def normalize_button_text(text: str) -> str:
+    normalized = text.strip().lower()
+    for token in ["🔥", "👟", "⌚", "📱"]:
+        normalized = normalized.replace(token, "")
+    return " ".join(normalized.split())
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
     text = update.message.text.strip()
     chat_id = update.message.chat.id
-    await update.message.reply_text(f"🔍 מחפש את '{text}' באלי אקספרס...")
+
+    normalized_text = normalize_button_text(text)
+    hot_products_requested = normalized_text in {"מוצרים חמים", "hot products", "hotproducts"}
+    button_query_config = BUTTON_QUERY_MAP.get(normalized_text)
+
+    if hot_products_requested:
+        await update.message.reply_text("🔥 מביא לך עכשיו מוצרים חמים מ-AliExpress...")
+    elif button_query_config:
+        await update.message.reply_text(f"🔎 מחפש עכשיו לפי קטגוריה: {normalized_text}")
+    else:
+        await update.message.reply_text(f"🔍 מחפש את '{text}' באלי אקספרס...")
 
     translation_provider = "original"
     translation_comparison = {}
-    if is_hebrew(text):
+    quick_category_ids = None
+    force_query = False
+    if hot_products_requested:
+        translated_text = "hot products"
+    elif button_query_config:
+        translated_text = button_query_config["keywords"]
+        quick_category_ids = os.getenv(button_query_config["category_env"], "").strip() or None
+        # category filtering is designed around product.query endpoint.
+        force_query = bool(quick_category_ids)
+    elif is_hebrew(text):
         translated_text, translation_provider, translation_comparison = await translate_to_english_with_debug(text)
     else:
         translated_text = text
 
     keyword_words = tokenize(translated_text)
 
-    data, search_method = await search_products_with_fallback(
-        keywords=translated_text,
-        page_no=1,
-        page_size=20,
-    )
+    compare_debug = os.getenv("ALI_COMPARE_SEARCH_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+    search_compare = None
+    if compare_debug and not hot_products_requested:
+        search_compare = await compare_search_methods(
+            keywords=translated_text,
+            page_no=1,
+            page_size=20,
+            category_ids=quick_category_ids,
+        )
+        print(f"ALI_SEARCH_COMPARE: {search_compare}")
+
+    if hot_products_requested:
+        data, search_method = await fetch_hot_products(page_no=1, page_size=20)
+    else:
+        data, search_method = await search_products_with_fallback(
+            keywords=translated_text,
+            page_no=1,
+            page_size=20,
+            category_ids=quick_category_ids,
+            force_query=force_query,
+        )
     print(f"ALI_SEARCH_METHOD: {search_method}")
 
     # Keep a full per-search log (original query + translation + raw API response)
@@ -41,6 +92,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data,
         translation_provider=translation_provider,
         translation_comparison=translation_comparison,
+        search_method=search_method,
+        search_compare=search_compare,
     )
 
     products = find_products_in_response(data)
@@ -51,10 +104,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filtered = []
     for p in products:
         title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
-        if not match_search_words(title, keyword_words):
+
+        if not hot_products_requested and not match_search_words(title, keyword_words):
             continue
 
-        p["__relevance"] = search_relevance_score(title, keyword_words)
+        p["__relevance"] = search_relevance_score(title, keyword_words) if not hot_products_requested else 0.0
         p["__rate"] = pick_best_rate(p)
         p["__review_count"] = pick_best_count(
             p,
@@ -68,7 +122,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p["__title"] = title
         filtered.append(p)
 
-    if not filtered:
+    if not filtered and not hot_products_requested:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         fallback_ranked = []
         for p in products:
@@ -97,7 +151,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Re-apply metric extraction after enrichment
     for p in enriched_candidates:
         title = p.get("__title") or p.get("title") or p.get("product_title") or p.get("productTitle", "")
-        p["__relevance"] = search_relevance_score(title, keyword_words)
+        p["__relevance"] = search_relevance_score(title, keyword_words) if not hot_products_requested else 0.0
         p["__review_count"] = pick_best_count(
             p, ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
         )

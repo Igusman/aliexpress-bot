@@ -47,6 +47,8 @@ def log_search(
     api_data: dict,
     translation_provider: str = "unknown",
     translation_comparison: Optional[dict] = None,
+    search_method: str = "unknown",
+    search_compare: Optional[dict] = None,
 ):
     search_file = Path(SEARCH_LOG_FILE)
     key_data = extract_key_data(api_data)
@@ -54,6 +56,8 @@ def log_search(
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "original_query": original_text,
         "translated_query": translated_text,
+        "search_method": search_method,
+        "search_compare": search_compare or {},
         "translation_provider": translation_provider,
         "translation_comparison": translation_comparison or {},
         "key_data": key_data,
@@ -69,6 +73,8 @@ def log_search(
         "timestamp": entry["timestamp"],
         "original_query": original_text,
         "translated_query": translated_text,
+        "search_method": search_method,
+        "search_compare": search_compare or {},
         "translation_provider": translation_provider,
         "translation_comparison": translation_comparison or {},
         "key_data": key_data,

@@ -40,7 +40,12 @@ _PRODUCT_FIELDS = ",".join([
 ])
 
 
-def build_product_query_params(keywords: str, page_no: int = 1, page_size: int = 20) -> dict:
+def build_product_query_params(
+    keywords: str,
+    page_no: int = 1,
+    page_size: int = 20,
+    category_ids: str | None = None,
+) -> dict:
     params = {
         "page_no": page_no,
         "page_size": page_size,
@@ -63,12 +68,54 @@ def build_product_query_params(keywords: str, page_no: int = 1, page_size: int =
     if sort_by:
         params["sort"] = sort_by
 
+    if category_ids:
+        params["category_ids"] = category_ids
+
     return params
 
 
-def build_product_smartmatch_params(keywords: str, page_no: int = 1, page_size: int = 20) -> dict:
+def build_product_smartmatch_params(
+    keywords: str,
+    page_no: int = 1,
+    page_size: int = 20,
+    category_ids: str | None = None,
+) -> dict:
     # Smartmatch shares the same locale/search parameters as product.query.
-    return build_product_query_params(keywords=keywords, page_no=page_no, page_size=page_size)
+    return build_product_query_params(
+        keywords=keywords,
+        page_no=page_no,
+        page_size=page_size,
+        category_ids=category_ids,
+    )
+
+
+def build_hotproduct_query_params(page_no: int = 1, page_size: int = 20) -> dict:
+    params = {
+        "page_no": page_no,
+        "page_size": page_size,
+        "fields": _PRODUCT_FIELDS,
+        "platform_product_type": os.getenv("ALI_PLATFORM_PRODUCT_TYPE", "ALL"),
+        "sort": os.getenv("ALI_HOTPRODUCT_SORT", "LAST_VOLUME_DESC"),
+    }
+
+    target_language = os.getenv("ALI_TARGET_LANGUAGE", "EN")
+    target_currency = os.getenv("ALI_TARGET_CURRENCY", "USD")
+    ship_to_country = os.getenv("ALI_SHIP_TO_COUNTRY", "US")
+
+    if target_language:
+        params["target_language"] = target_language
+    if target_currency:
+        params["target_currency"] = target_currency
+    if ship_to_country:
+        params["ship_to_country"] = ship_to_country
+
+    return params
+
+
+def _to_bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def parse_metric_count(value) -> int:
@@ -152,6 +199,8 @@ async def search_products_with_fallback(
     keywords: str,
     page_no: int = 1,
     page_size: int = 20,
+    category_ids: str | None = None,
+    force_query: bool = False,
 ) -> tuple[dict, str]:
     """Search products using configured strategy.
 
@@ -166,12 +215,18 @@ async def search_products_with_fallback(
         keywords=keywords,
         page_no=page_no,
         page_size=page_size,
+        category_ids=category_ids,
     )
     query_params = build_product_query_params(
         keywords=keywords,
         page_no=page_no,
         page_size=page_size,
+        category_ids=category_ids,
     )
+
+    if force_query:
+        query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
+        return query_data, "aliexpress.affiliate.product.query"
 
     if search_mode == "smartmatch":
         smartmatch_data = await call_aliexpress_sync_api(
@@ -194,6 +249,58 @@ async def search_products_with_fallback(
 
     query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
     return query_data, "aliexpress.affiliate.product.query"
+
+
+async def compare_search_methods(
+    keywords: str,
+    page_no: int = 1,
+    page_size: int = 20,
+    category_ids: str | None = None,
+) -> dict:
+    """Compare smartmatch and product.query responses for the same input.
+    Returns count + sample titles for easier runtime verification."""
+    smartmatch_params = build_product_smartmatch_params(
+        keywords=keywords,
+        page_no=page_no,
+        page_size=page_size,
+        category_ids=category_ids,
+    )
+    query_params = build_product_query_params(
+        keywords=keywords,
+        page_no=page_no,
+        page_size=page_size,
+        category_ids=category_ids,
+    )
+
+    smartmatch_data, query_data = await asyncio.gather(
+        call_aliexpress_sync_api("aliexpress.affiliate.product.smartmatch", smartmatch_params),
+        call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params),
+    )
+
+    smartmatch_products = find_products_in_response(smartmatch_data) or []
+    query_products = find_products_in_response(query_data) or []
+
+    def _sample_titles(products: list[dict], limit: int = 3) -> list[str]:
+        titles = []
+        for p in products[:limit]:
+            t = p.get("title") or p.get("product_title") or p.get("productTitle") or ""
+            if t:
+                titles.append(str(t)[:120])
+        return titles
+
+    return {
+        "keywords": keywords,
+        "smartmatch_count": len(smartmatch_products),
+        "query_count": len(query_products),
+        "smartmatch_titles": _sample_titles(smartmatch_products),
+        "query_titles": _sample_titles(query_products),
+    }
+
+
+async def fetch_hot_products(page_no: int = 1, page_size: int = 20) -> tuple[dict, str]:
+    params = build_hotproduct_query_params(page_no=page_no, page_size=page_size)
+    data = await call_aliexpress_sync_api("aliexpress.affiliate.hotproduct.query", params)
+    return data, "aliexpress.affiliate.hotproduct.query"
 
 
 _DETAIL_FIELDS = ",".join([
