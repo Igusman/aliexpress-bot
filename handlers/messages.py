@@ -13,7 +13,7 @@ from services.aliexpress_api import (
     search_products_with_fallback,
 )
 from services.logging import log_search
-from services.utils import tokenize, match_search_words, search_relevance_score, shorten_url
+from services.utils import tokenize, match_search_words, search_relevance_score
 
 BUTTON_QUERY_MAP = {
     "נעליים": {"keywords": "shoes", "category_env": "ALI_CATEGORY_SHOES"},
@@ -189,8 +189,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for p in top5:
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
-        link = p.get("promotion_link") or "N/A"
-        short_link = shorten_url(link)
+        link = p.get("product_detail_url") or p.get("promotion_link") or "N/A"
         original_price = p.get("target_original_price") or "N/A"
         sale_price = p.get("target_sale_price") or "N/A"
         rate = p.get("__rate", "N/A")
@@ -209,7 +208,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
             f"{metrics_line}\n"
-            f"🔗 <a href=\"{short_link}\">קישור למוצר</a>"
+            f"🔗 <a href=\"{link}\">קישור למוצר</a>"
         )
         captions.append(caption)
         if image:
