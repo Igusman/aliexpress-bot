@@ -1,6 +1,5 @@
 import time
 import os
-from html import escape
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
@@ -205,18 +204,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             metrics.append(f"🛍️ כמות הזמנות: {trade_count}")
         metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
-        if link != "N/A":
-            safe_link_href = escape(link, quote=True)
-            safe_link_text = escape(link)
-            link_line = f"🔗 <a href=\"{safe_link_href}\">{safe_link_text}</a>"
-        else:
-            link_line = "🔗 N/A"
-
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
             f"{metrics_line}\n"
-            f"{link_line}"
+            f"🔗 <a href=\"{link}\">קישור למוצר</a>"
         )
         captions.append(caption)
         if image:
@@ -228,9 +220,5 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("שגיאה באלבום:", e)
 
-    await update.message.reply_text(
-        "\n\n".join(captions)[:4096],
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
+    await update.message.reply_text("\n\n".join(captions)[:4096], parse_mode="HTML")
     print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
