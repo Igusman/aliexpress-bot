@@ -2,7 +2,7 @@ import time
 import os
 from html import escape
 from urllib.parse import urlparse
-from telegram import Update, InputMediaPhoto
+from telegram import Update, InputMediaPhoto, MessageEntity
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
 from services.aliexpress_api import (
@@ -278,17 +278,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             metrics.append(f"🛍️ כמות הזמנות: {trade_count}")
         metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
-        safe_title = escape(translated_title)
-        safe_metrics = escape(metrics_line)
-        safe_link = escape(link, quote=True)
+        short_title = translated_title.strip()
+        if len(short_title) > 90:
+            short_title = short_title[:87].rstrip() + "..."
 
-        caption = (
-            f"<b>{safe_title}</b>\n"
-            f"מחיר: <b>{sale_price}$</b>\n"
-            f"{safe_metrics}\n"
-            f"🔗 <a href=\"{safe_link}\">קישור למוצר</a>"
+        message_part = (
+            f"{short_title}\n"
+            f"מחיר: {sale_price}$\n"
+            f"{metrics_line}\n"
+            f"🔗 קישור למוצר"
         )
-        captions.append(caption)
+        captions.append((message_part, link))
         if image:
             media_group.append(InputMediaPhoto(media=image, caption=title[:100]))
 
@@ -298,17 +298,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("שגיאה באלבום:", e)
 
-    html_chunks = chunk_html_messages(captions, limit=4096)
-    for message_html in html_chunks:
-        try:
-            await update.message.reply_text(
-                message_html,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-        except Exception as e:
-            print("שגיאה בשליחת טקסט HTML, נשלח טקסט פשוט:", e)
-            plain_text = message_html.replace("<b>", "").replace("</b>", "")
-            plain_text = plain_text.replace("<a href=\"", "").replace("\">קישור למוצר</a>", "")
-            await update.message.reply_text(plain_text[:4096], disable_web_page_preview=True)
+    message_parts = []
+    entities = []
+    offset = 0
+
+    for i, (part, link) in enumerate(captions):
+        if i > 0:
+            message_parts.append("\n\n")
+            offset += 2
+
+        part_start = offset
+        message_parts.append(part)
+        offset += len(part)
+
+        if link and link != "N/A":
+            label = "קישור למוצר"
+            label_pos = part.find(label)
+            if label_pos >= 0:
+                entities.append(
+                    MessageEntity(
+                        type=MessageEntity.TEXT_LINK,
+                        offset=part_start + label_pos,
+                        length=len(label),
+                        url=link,
+                    )
+                )
+
+    message_text = "".join(message_parts)
+    try:
+        await update.message.reply_text(
+            message_text[:4096],
+            entities=entities,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        print("שגיאה בשליחת הודעת קישורים:", e)
+        await update.message.reply_text(message_text[:4096], disable_web_page_preview=True)
     print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
