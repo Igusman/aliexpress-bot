@@ -205,12 +205,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             metrics.append(f"🛍️ כמות הזמנות: {trade_count}")
         metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
-        link_line = f"🔗 {escape(link)}"
         if link != "N/A":
-            # Keep the full URL visible while preserving clickability.
-            safe_link = escape(link, quote=True)
+            safe_link_href = escape(link, quote=True)
             safe_link_text = escape(link)
-            link_line = f"🔗 <a href=\"{safe_link}\">{safe_link_text}</a>"
+            link_line = f"🔗 <a href=\"{safe_link_href}\">{safe_link_text}</a>"
+        else:
+            link_line = "🔗 N/A"
 
         caption = (
             f"<b>{translated_title}</b>\n"
