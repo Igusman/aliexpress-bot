@@ -2,7 +2,7 @@ import time
 import os
 from html import escape
 from urllib.parse import urlparse
-from telegram import Update, InputMediaPhoto, MessageEntity
+from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
 from services.aliexpress_api import (
@@ -298,40 +298,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("שגיאה באלבום:", e)
 
-    message_parts = []
-    entities = []
-    offset = 0
-
-    for i, (part, link) in enumerate(captions):
-        if i > 0:
-            message_parts.append("\n\n")
-            offset += 2
-
-        part_start = offset
-        message_parts.append(part)
-        offset += len(part)
-
+    html_parts = []
+    for part, link in captions:
+        safe_part = escape(part)
         if link and link != "N/A":
-            label = "קישור למוצר"
-            label_pos = part.find(label)
-            if label_pos >= 0:
-                entities.append(
-                    MessageEntity(
-                        type=MessageEntity.TEXT_LINK,
-                        offset=part_start + label_pos,
-                        length=len(label),
-                        url=link,
-                    )
-                )
+            safe_link = escape(link, quote=True)
+            safe_part = safe_part.replace("קישור למוצר", f"<a href=\"{safe_link}\">קישור למוצר</a>")
+        html_parts.append(safe_part)
 
-    message_text = "".join(message_parts)
+    message_html = "\n\n".join(html_parts)
     try:
         await update.message.reply_text(
-            message_text[:4096],
-            entities=entities,
+            message_html,
+            parse_mode="HTML",
             disable_web_page_preview=True,
         )
     except Exception as e:
         print("שגיאה בשליחת הודעת קישורים:", e)
-        await update.message.reply_text(message_text[:4096], disable_web_page_preview=True)
+        plain_text = message_html.replace("<a href=\"", "").replace("\">קישור למוצר</a>", "קישור למוצר")
+        await update.message.reply_text(plain_text, disable_web_page_preview=True)
     print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
