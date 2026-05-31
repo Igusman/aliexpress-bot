@@ -1,5 +1,6 @@
 import time
 import os
+from html import escape
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
@@ -189,7 +190,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for p in top5:
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
-        link = p.get("product_detail_url") or p.get("promotion_link") or "N/A"
+        link = p.get("promotion_link") or "N/A"
         original_price = p.get("target_original_price") or "N/A"
         sale_price = p.get("target_sale_price") or "N/A"
         rate = p.get("__rate", "N/A")
@@ -204,11 +205,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             metrics.append(f"🛍️ כמות הזמנות: {trade_count}")
         metrics_line = " | ".join(metrics) if metrics else "📊 אין נתוני מכירות"
 
+        link_line = f"🔗 {escape(link)}"
+        if link != "N/A":
+            # Keep the full URL visible while preserving clickability.
+            safe_link = escape(link, quote=True)
+            safe_link_text = escape(link)
+            link_line = f"🔗 <a href=\"{safe_link}\">{safe_link_text}</a>"
+
         caption = (
             f"<b>{translated_title}</b>\n"
             f"מחיר: <b>{sale_price}$</b>\n"
             f"{metrics_line}\n"
-            f"🔗 <a href=\"{link}\">קישור למוצר</a>"
+            f"{link_line}"
         )
         captions.append(caption)
         if image:
@@ -220,5 +228,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("שגיאה באלבום:", e)
 
-    await update.message.reply_text("\n\n".join(captions)[:4096], parse_mode="HTML")
+    await update.message.reply_text(
+        "\n\n".join(captions)[:4096],
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
     print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
