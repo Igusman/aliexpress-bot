@@ -1,6 +1,7 @@
 import time
 import os
 from html import escape
+from urllib.parse import urlparse
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
 from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
@@ -28,6 +29,78 @@ def normalize_button_text(text: str) -> str:
     for token in ["🔥", "👟", "⌚", "📱"]:
         normalized = normalized.replace(token, "")
     return " ".join(normalized.split())
+
+
+def is_generic_aliexpress_link(link: str) -> bool:
+    if not link:
+        return True
+
+    normalized = link.strip().lower()
+    if not normalized:
+        return True
+
+    parsed = urlparse(normalized)
+    host = (parsed.netloc or "").lower()
+
+    if "best.aliexpress.com" in host:
+        return True
+
+    if normalized in {
+        "https://www.aliexpress.com",
+        "https://www.aliexpress.com/",
+        "https://aliexpress.com",
+        "https://aliexpress.com/",
+        "https://best.aliexpress.com",
+        "https://best.aliexpress.com/",
+    }:
+        return True
+
+    return False
+
+
+def pick_best_product_link(product: dict) -> str:
+    # Try multiple API fields and skip generic landing pages.
+    candidates = [
+        product.get("promotion_link"),
+        product.get("product_detail_url"),
+        product.get("detail_url"),
+        product.get("product_url"),
+        product.get("url"),
+    ]
+
+    for raw in candidates:
+        if not raw:
+            continue
+        link = str(raw).strip()
+        if not is_generic_aliexpress_link(link):
+            return link
+
+    return "N/A"
+
+
+def chunk_html_messages(parts: list[str], limit: int = 4096) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+
+    for part in parts:
+        candidate = part if not current else f"{current}\n\n{part}"
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+
+        if len(part) <= limit:
+            current = part
+        else:
+            chunks.append(part[:limit])
+            current = ""
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
@@ -225,12 +298,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("שגיאה באלבום:", e)
 
-    message_html = "\n\n".join(captions)[:4096]
-    try:
-        await update.message.reply_text(message_html, parse_mode="HTML")
-    except Exception as e:
-        print("שגיאה בשליחת טקסט HTML, נשלח טקסט פשוט:", e)
-        plain_text = message_html.replace("<b>", "").replace("</b>", "")
-        plain_text = plain_text.replace("<a href=\"", "").replace("\">קישור למוצר</a>", "")
-        await update.message.reply_text(plain_text[:4096])
+    html_chunks = chunk_html_messages(captions, limit=4096)
+    for message_html in html_chunks:
+        try:
+            await update.message.reply_text(
+                message_html,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            print("שגיאה בשליחת טקסט HTML, נשלח טקסט פשוט:", e)
+            plain_text = message_html.replace("<b>", "").replace("</b>", "")
+            plain_text = plain_text.replace("<a href=\"", "").replace("\">קישור למוצר</a>", "")
+            await update.message.reply_text(plain_text[:4096], disable_web_page_preview=True)
     print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
