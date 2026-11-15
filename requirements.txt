@@ -1,4 +1,4 @@
-﻿python-telegram-bot
-python-dotenv
-requests
-deep-translator
+python-telegram-bot>=22,<23
+python-dotenv>=1,<2
+requests>=2,<3
+deep-translator>=1.11,<2
