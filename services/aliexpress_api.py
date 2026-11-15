@@ -459,7 +459,12 @@ async def enrich_products_with_details(products: list[dict]) -> list[dict]:
         return products
 
     loop = asyncio.get_running_loop()
-    details = await loop.run_in_executor(None, _fetch_product_details_sync, missing_ids)
+    # Up to 20 IDs per productdetail.get call, batches run concurrently.
+    batches = [missing_ids[i:i + 20] for i in range(0, len(missing_ids), 20)]
+    results = await asyncio.gather(
+        *(loop.run_in_executor(None, _fetch_product_details_sync, b) for b in batches)
+    )
+    details = {pid: d for r in results for pid, d in r.items()}
 
     if not details:
         return products

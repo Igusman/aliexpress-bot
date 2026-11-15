@@ -19,7 +19,7 @@ from services.aliexpress_api import (
     search_products_with_fallback,
 )
 from services.logging import log_search
-from services.utils import tokenize, match_search_words, search_relevance_score
+from services.utils import tokenize, match_search_words, rank_products, search_relevance_score
 
 BUTTON_QUERY_MAP = {
     "נעליים": {"keywords": "shoes", "category_env": "ALI_CATEGORY_SHOES"},
@@ -35,6 +35,17 @@ def format_price(price, currency: str | None) -> str:
     code = (currency or os.getenv("ALI_TARGET_CURRENCY", "USD") or "USD").strip().upper()
     symbol = CURRENCY_SYMBOLS.get(code)
     return f"{price}{symbol}" if symbol else f"{price} {code}"
+
+
+def price_line(p: dict) -> str:
+    currency = p.get("target_sale_price_currency")
+    sale = p.get("target_sale_price") or "N/A"
+    line = format_price(sale, currency)
+    discount = p.get("__discount", 0)
+    original = p.get("target_original_price")
+    if discount >= 1 and original:
+        line += f" (במקום {format_price(original, p.get('target_original_price_currency') or currency)}, {discount:.0f}% הנחה)"
+    return line
 
 
 def normalize_button_text(text: str) -> str:
@@ -192,17 +203,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         search_compare = await compare_search_methods(
             keywords=translated_text,
             page_no=1,
-            page_size=20,
+            page_size=50,
             category_ids=quick_category_ids,
         )
         print(f"ALI_SEARCH_COMPARE: {search_compare}")
 
     if hot_products_requested:
-        data, search_method = await fetch_hot_products(page_no=1, page_size=20)
+        data, search_method = await fetch_hot_products(page_no=1, page_size=50)
     elif button_query_config:
         data, search_method = await fetch_hot_products(
             page_no=1,
-            page_size=20,
+            page_size=50,
             category_ids=quick_category_ids,
             keywords=translated_text,
         )
@@ -211,7 +222,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data, search_method = await search_products_with_fallback(
                 keywords=translated_text,
                 page_no=1,
-                page_size=20,
+                page_size=50,
                 category_ids=quick_category_ids,
                 force_query=bool(quick_category_ids),
             )
@@ -219,7 +230,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data, search_method = await search_products_with_fallback(
             keywords=translated_text,
             page_no=1,
-            page_size=20,
+            page_size=50,
             category_ids=quick_category_ids,
             force_query=force_query,
         )
@@ -260,8 +271,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not filtered and not hot_products_requested:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
         fallback_ranked = [annotate_product(p, keyword_words, hot_products_requested) for p in products]
-        fallback_ranked.sort(key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0)))
-        filtered = fallback_ranked[:10]
+        filtered = rank_products(fallback_ranked, min_rating=0)[:10]
 
     # Enrich all current candidates first, then rank with the enriched metrics.
     # This avoids picking an arbitrary top-5 when initial API response has zeros/nulls.
@@ -271,11 +281,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for p in enriched_candidates:
         annotate_product(p, keyword_words, hot_products_requested)
 
-    # Sort by relevance first, then by sales and rating.
-    enriched_candidates.sort(
-        key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0))
-    )
-    top5 = enriched_candidates[:5]
+    # Most relevant first, then best combination of rating, sales and discount.
+    top5 = rank_products(enriched_candidates)[:5]
 
     # Every product should link through the affiliate account. Products the
     # search returned without promotion_link get one from link.generate.
@@ -292,8 +299,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
         link = pick_best_product_link(p)
-        original_price = p.get("target_original_price") or "N/A"
-        sale_price = p.get("target_sale_price") or "N/A"
         rate = p.get("__rate", "N/A")
 
         trade_count = p.get('__trade_count', 0)
@@ -311,7 +316,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         message_part = (
             f"{short_title}\n"
-            f"מחיר: {format_price(sale_price, p.get('target_sale_price_currency'))}\n"
+            f"מחיר: {price_line(p)}\n"
             f"{metrics_line}\n"
             f"🔗 קישור למוצר"
         )

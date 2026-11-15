@@ -134,3 +134,48 @@ def test_get_api_error_variants():
     assert get_api_error(empty) == "resp_code 405: The result is empty"
     assert get_api_error({"error": "timeout"}) == "timeout"
     assert get_api_error({}) == "empty response"
+
+
+# discount_percent / rank_products / price_line
+
+from handlers.messages import price_line  # noqa: E402
+from services.utils import discount_percent, rank_products  # noqa: E402
+
+
+def test_discount_percent():
+    assert discount_percent({"discount": "35%"}) == 35.0
+    assert discount_percent({"target_original_price": "10", "target_sale_price": "7.5"}) == 25.0
+    assert discount_percent({"target_original_price": "5", "target_sale_price": "5"}) == 0.0
+    assert discount_percent({}) == 0.0
+
+
+def _p(name, relevance=100.0, rate=95.0, sales=100, **extra):
+    return {"name": name, "__relevance": relevance, "__rate": rate, "__total_sales": sales, **extra}
+
+
+def test_rank_products_relevance_first():
+    ranked = rank_products([_p("half", relevance=50, sales=10000), _p("full", relevance=100, sales=5)])
+    assert [p["name"] for p in ranked] == ["full", "half"]
+
+
+def test_rank_products_prefers_rating_sales_discount_within_bucket():
+    ranked = rank_products([
+        _p("low-rated", rate=82, sales=100),
+        _p("popular", rate=96, sales=5000),
+        _p("unknown", rate=0, sales=0),
+        _p("discounted", rate=96, sales=100, discount="60%"),
+    ], min_rating=0)
+    assert [p["name"] for p in ranked] == ["popular", "discounted", "low-rated", "unknown"]
+
+
+def test_rank_products_drops_poor_ratings_only_if_enough_left():
+    many = [_p(f"good{i}") for i in range(5)] + [_p("bad", rate=70)]
+    assert "bad" not in [p["name"] for p in rank_products(many, min_rating=85)]
+    few = [_p("good"), _p("bad", rate=70)]
+    assert [p["name"] for p in rank_products(few, min_rating=85)] == ["good", "bad"]
+
+
+def test_price_line_shows_discount():
+    p = {"target_sale_price": "7.5", "target_original_price": "10", "target_sale_price_currency": "USD", "__discount": 25.0}
+    assert price_line(p) == "7.5$ (במקום 10$, 25% הנחה)"
+    assert price_line({"target_sale_price": "3", "target_sale_price_currency": "USD"}) == "3$"
