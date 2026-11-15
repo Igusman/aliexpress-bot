@@ -269,7 +269,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for p, translated_title in zip(top5, translated_titles):
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
-        link = p.get("promotion_link") or "N/A"
+        link = pick_best_product_link(p)
         original_price = p.get("target_original_price") or "N/A"
         sale_price = p.get("target_sale_price") or "N/A"
         rate = p.get("__rate", "N/A")
