@@ -1,5 +1,6 @@
 import json
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,10 @@ def extract_key_data(api_data: dict, limit: int = 5):
     }
 
 
+def _log_to_file_enabled() -> bool:
+    return os.getenv("SEARCH_LOG_TO_FILE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def log_search(
     original_text: str,
     translated_text: str,
@@ -50,32 +55,22 @@ def log_search(
     search_method: str = "unknown",
     search_compare: Optional[dict] = None,
 ):
-    search_file = Path(SEARCH_LOG_FILE)
-    key_data = extract_key_data(api_data)
     entry = {
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "original_query": original_text,
         "translated_query": translated_text,
         "search_method": search_method,
         "search_compare": search_compare or {},
         "translation_provider": translation_provider,
         "translation_comparison": translation_comparison or {},
-        "key_data": key_data,
-        "aliexpress_data": api_data,
+        "key_data": extract_key_data(api_data),
     }
 
-    with open(search_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False))
-        f.write("\n")
+    # Structured log line for Railway runtime logs.
+    print("SEARCH_LOG:", json.dumps(entry, ensure_ascii=False))
 
-    # Also print structured logs for Railway runtime logs
-    print("SEARCH_LOG:", json.dumps({
-        "timestamp": entry["timestamp"],
-        "original_query": original_text,
-        "translated_query": translated_text,
-        "search_method": search_method,
-        "search_compare": search_compare or {},
-        "translation_provider": translation_provider,
-        "translation_comparison": translation_comparison or {},
-        "key_data": key_data,
-    }, ensure_ascii=False))
+    # Optional local file log (without the full raw API response).
+    if _log_to_file_enabled():
+        with open(Path(SEARCH_LOG_FILE), "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False))
+            f.write("\n")

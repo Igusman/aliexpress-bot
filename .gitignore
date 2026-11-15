@@ -21,3 +21,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Search log (see SEARCH_LOG_TO_FILE)
+search_log.txt
