@@ -88,6 +88,26 @@ def pick_best_product_link(product: dict) -> str:
     return "N/A"
 
 
+REVIEW_COUNT_KEYS = ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
+TRADE_COUNT_KEYS = ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"]
+
+
+def product_title(p: dict) -> str:
+    return p.get("__title") or p.get("title") or p.get("product_title") or p.get("productTitle", "")
+
+
+def annotate_product(p: dict, keyword_words: list[str], hot_products_requested: bool) -> dict:
+    """Compute the ranking metrics (stored on the product as __* keys) and return the product."""
+    title = product_title(p)
+    p["__title"] = title
+    p["__relevance"] = search_relevance_score(title, keyword_words) if not hot_products_requested else 0.0
+    p["__rate"] = pick_best_rate(p)
+    p["__review_count"] = pick_best_count(p, REVIEW_COUNT_KEYS)
+    p["__trade_count"] = pick_best_count(p, TRADE_COUNT_KEYS)
+    p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
+    return p
+
+
 def chunk_html_messages(parts: list[str], limit: int = 4096) -> list[str]:
     chunks: list[str] = []
     current = ""
@@ -203,44 +223,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     filtered = []
     for p in products:
-        title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
+        title = product_title(p)
 
         if not hot_products_requested and not match_search_words(title, keyword_words):
             continue
 
-        p["__relevance"] = search_relevance_score(title, keyword_words) if not hot_products_requested else 0.0
-        p["__rate"] = pick_best_rate(p)
-        p["__review_count"] = pick_best_count(
-            p,
-            ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"],
-        )
-        p["__trade_count"] = pick_best_count(
-            p,
-            ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
-        )
-        p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
-        p["__title"] = title
-        filtered.append(p)
+        filtered.append(annotate_product(p, keyword_words, hot_products_requested))
 
     if not filtered and not hot_products_requested:
         await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
-        fallback_ranked = []
-        for p in products:
-            title = p.get("title") or p.get("product_title") or p.get("productTitle", "")
-            p["__relevance"] = search_relevance_score(title, keyword_words)
-            p["__rate"] = pick_best_rate(p)
-            p["__review_count"] = pick_best_count(
-                p,
-                ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"],
-            )
-            p["__trade_count"] = pick_best_count(
-                p,
-                ["lastest_volume", "trade_count", "orders", "order_count", "sale_count", "sold_count", "volume"],
-            )
-            p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
-            p["__title"] = title
-            fallback_ranked.append(p)
-
+        fallback_ranked = [annotate_product(p, keyword_words, hot_products_requested) for p in products]
         fallback_ranked.sort(key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0)))
         filtered = fallback_ranked[:10]
 
@@ -250,17 +242,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Re-apply metric extraction after enrichment
     for p in enriched_candidates:
-        title = p.get("__title") or p.get("title") or p.get("product_title") or p.get("productTitle", "")
-        p["__relevance"] = search_relevance_score(title, keyword_words) if not hot_products_requested else 0.0
-        p["__review_count"] = pick_best_count(
-            p, ["review_count", "reviews", "feedback_count", "evaluate_count", "comment_count"]
-        )
-        p["__trade_count"] = pick_best_count(
-            p, ["lastest_volume", "trade_count", "orders", "order_count",
-                "sale_count", "sold_count", "volume"]
-        )
-        p["__total_sales"] = max(p.get("__review_count", 0), p.get("__trade_count", 0))
-        p["__rate"] = pick_best_rate(p)
+        annotate_product(p, keyword_words, hot_products_requested)
 
     # Sort by relevance first, then by sales and rating.
     enriched_candidates.sort(
