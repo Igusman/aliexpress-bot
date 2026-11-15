@@ -29,7 +29,7 @@ _GOOGLE_LANG_MAP = {
 def _translate_google(text: str, source: str, target: str) -> str:
     source_code = _GOOGLE_LANG_MAP.get(source, source)
     target_code = _GOOGLE_LANG_MAP.get(target, target)
-    return GoogleTranslator(source=source_code, target=target).translate(text)
+    return GoogleTranslator(source=source_code, target=target_code).translate(text)
 
 
 def _translate_chatgpt(text: str, source: str, target: str) -> str:
