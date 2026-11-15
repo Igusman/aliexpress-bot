@@ -1,5 +1,4 @@
 import re
-import pyshorteners
 from telegram.ext import ContextTypes
 from telegram import Update
 
@@ -64,14 +63,6 @@ def match_search_words(product_title: str, keyword_words: list[str], threshold: 
             return False
 
     return True
-
-
-def shorten_url(long_url):
-    try:
-        return pyshorteners.Shortener().tinyurl.short(long_url)
-    except Exception as e:
-        print(f"URL shortening error: {e}")
-        return long_url
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
