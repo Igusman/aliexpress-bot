@@ -186,6 +186,13 @@ def pick_best_rate(product: dict) -> float:
 
     return 0.0
 
+def api_timestamp() -> str:
+    """Request timestamp as epoch milliseconds, like the official AliExpress SDK.
+    The "YYYY-MM-DD HH:MM:SS" form is read by the gateway as GMT+8 (China time),
+    so a UTC string is 8 hours off and the request is rejected."""
+    return str(int(time.time() * 1000))
+
+
 def generate_signature(params: dict, app_secret: str) -> str:
     sorted_params = ''.join([f"{k}{v}" for k, v in sorted(params.items())])
     base_string = f"{app_secret}{sorted_params}{app_secret}"
@@ -200,7 +207,7 @@ def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
     params = {
         "app_key": ALI_KEY,
         "method": method,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        "timestamp": api_timestamp(),
         "format": "json",
         "v": "2.0",
         "sign_method": "md5",
@@ -367,7 +374,7 @@ def _fetch_product_details_sync(product_ids: list[str]) -> dict[str, dict]:
     params = {
         "app_key": ALI_KEY,
         "method": "aliexpress.affiliate.productdetail.get",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        "timestamp": api_timestamp(),
         "format": "json",
         "v": "2.0",
         "sign_method": "md5",
