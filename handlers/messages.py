@@ -1,3 +1,4 @@
+import asyncio
 import time
 import os
 from html import escape
@@ -258,16 +259,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     top5 = enriched_candidates[:5]
 
+    # Translate all titles concurrently instead of one after another.
+    translated_titles = await asyncio.gather(
+        *(translate_to_hebrew(p.get("__title", "")) for p in top5)
+    )
+
     media_group = []
     captions = []
-    for p in top5:
+    for p, translated_title in zip(top5, translated_titles):
         title = p.get("__title", "")
         image = p.get("product_main_image_url") or p.get("image_url")
         link = p.get("promotion_link") or "N/A"
         original_price = p.get("target_original_price") or "N/A"
         sale_price = p.get("target_sale_price") or "N/A"
         rate = p.get("__rate", "N/A")
-        translated_title = await translate_to_hebrew(title)
 
         trade_count = p.get('__trade_count', 0)
 

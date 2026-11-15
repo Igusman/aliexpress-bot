@@ -9,7 +9,8 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
 if __name__ == "__main__":
-    app = Application.builder().token(TOKEN).build()
+    # concurrent_updates: handle several users at once instead of queueing them.
+    app = Application.builder().token(TOKEN).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

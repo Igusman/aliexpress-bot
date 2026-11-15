@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Dict, Tuple
 
@@ -98,7 +99,9 @@ async def translate(text: str, source: str, target: str) -> Tuple[str, str]:
     Returns (translated_text, provider); ("", "none") if all providers fail."""
     for provider in _provider_order():
         try:
-            translated = _normalize_text(_translate_with_provider(provider, text, source, target))
+            translated = _normalize_text(
+                await asyncio.to_thread(_translate_with_provider, provider, text, source, target)
+            )
         except Exception as e:
             print(f"Translation error ({provider}, {source}->{target}): {e}")
             continue
@@ -112,7 +115,9 @@ async def compare_translations(text: str, source: str = "he", target: str = "en"
     results: Dict[str, Dict[str, str]] = {}
     for provider in PROVIDER_ORDER:
         try:
-            translated = _normalize_text(_translate_with_provider(provider, text, source, target))
+            translated = _normalize_text(
+                await asyncio.to_thread(_translate_with_provider, provider, text, source, target)
+            )
             results[provider] = {
                 "translated_text": translated,
                 "status": "ok",
