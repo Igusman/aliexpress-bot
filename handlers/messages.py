@@ -286,7 +286,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         captions.append((message_part, link))
         if image:
-            media_group.append(InputMediaPhoto(media=image, caption=title[:100]))
+            media_group.append(InputMediaPhoto(media=image, caption=short_title))
 
     if media_group:
         try:
