@@ -11,6 +11,8 @@ from services.aliexpress_api import (
     enrich_products_with_details,
     fetch_hot_products,
     find_products_in_response,
+    generate_affiliate_links,
+    product_page_url,
     get_api_error,
     pick_best_count,
     pick_best_rate,
@@ -107,6 +109,23 @@ def annotate_product(p: dict, keyword_words: list[str], hot_products_requested: 
     p["__trade_count"] = pick_best_count(p, TRADE_COUNT_KEYS)
     p["__total_sales"] = max(p["__review_count"], p["__trade_count"])
     return p
+
+
+async def ensure_affiliate_links(products: list[dict]) -> None:
+    missing = {}
+    for p in products:
+        if not p.get("promotion_link") or is_generic_aliexpress_link(str(p.get("promotion_link"))):
+            url = product_page_url(p)
+            if url:
+                missing[url] = p
+    if not missing:
+        return
+    links = await generate_affiliate_links(list(missing))
+    for url, p in missing.items():
+        if url in links:
+            p["promotion_link"] = links[url]
+        else:
+            print(f"No affiliate link for {url}, using the plain product link")
 
 
 def chunk_html_messages(parts: list[str], limit: int = 4096) -> list[str]:
@@ -257,6 +276,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         key=lambda x: (-x.get("__relevance", 0.0), -x.get("__total_sales", 0), -x.get("__rate", 0.0))
     )
     top5 = enriched_candidates[:5]
+
+    # Every product should link through the affiliate account. Products the
+    # search returned without promotion_link get one from link.generate.
+    await ensure_affiliate_links(top5)
 
     # Translate all titles concurrently instead of one after another.
     translated_titles = await asyncio.gather(

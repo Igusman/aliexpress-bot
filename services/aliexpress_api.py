@@ -348,6 +348,47 @@ async def fetch_hot_products(
     return data, "aliexpress.affiliate.hotproduct.query"
 
 
+def product_page_url(product: dict) -> str | None:
+    """Plain (non-affiliate) product page URL."""
+    url = product.get("product_detail_url")
+    if url:
+        return str(url).strip()
+    pid = product.get("product_id")
+    return f"https://www.aliexpress.com/item/{pid}.html" if pid else None
+
+
+async def generate_affiliate_links(urls: list[str]) -> dict[str, str]:
+    """Turn plain AliExpress URLs into affiliate links with
+    aliexpress.affiliate.link.generate. Needs ALI_TRACKING_ID.
+    Returns {source_url: promotion_link}; {} on failure."""
+    tracking_id = os.getenv("ALI_TRACKING_ID", "").strip()
+    if not urls or not tracking_id:
+        if urls:
+            print("ALI_TRACKING_ID is not set - cannot generate affiliate links")
+        return {}
+
+    data = await call_aliexpress_sync_api("aliexpress.affiliate.link.generate", {
+        "source_values": ",".join(urls),
+        "promotion_link_type": 0,
+        "tracking_id": tracking_id,
+    })
+    error = get_api_error(data)
+    if error:
+        print(f"ALI_API_ERROR (link.generate): {error}")
+        return {}
+
+    links: dict[str, str] = {}
+    try:
+        result = data["aliexpress_affiliate_link_generate_response"]["resp_result"]["result"]
+        items = result["promotion_links"]["promotion_link"]
+    except (KeyError, TypeError):
+        items = []
+    for item in items or []:
+        if isinstance(item, dict) and item.get("source_value") and item.get("promotion_link"):
+            links[str(item["source_value"])] = str(item["promotion_link"])
+    return links
+
+
 _DETAIL_FIELDS = ",".join([
     "product_id",
     "evaluate_rate",
