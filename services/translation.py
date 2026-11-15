@@ -1,14 +1,16 @@
 import asyncio
 import os
+import time
 from typing import Dict, Tuple
 
 import requests
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PROVIDER_ORDER = ["google", "chatgpt"]
+# Free providers first; ChatGPT (paid) is the last resort.
+PROVIDER_ORDER = ["google", "mymemory", "chatgpt"]
 PREFERRED_PROVIDER = "google"
 
 
@@ -31,6 +33,17 @@ def _translate_google(text: str, source: str, target: str) -> str:
     source_code = _GOOGLE_LANG_MAP.get(source, source)
     target_code = _GOOGLE_LANG_MAP.get(target, target)
     return GoogleTranslator(source=source_code, target=target_code).translate(text)
+
+
+_MYMEMORY_LANG_MAP = {"he": "hebrew", "en": "english"}
+
+
+def _translate_mymemory(text: str, source: str, target: str) -> str:
+    # Free MyMemory API (no key, ~5000 chars/day per IP), used when Google is rate-limited.
+    return MyMemoryTranslator(
+        source=_MYMEMORY_LANG_MAP.get(source, source),
+        target=_MYMEMORY_LANG_MAP.get(target, target),
+    ).translate(text)
 
 
 def _translate_chatgpt(text: str, source: str, target: str) -> str:
@@ -79,6 +92,8 @@ def _translate_chatgpt(text: str, source: str, target: str) -> str:
 def _translate_with_provider(provider: str, text: str, source: str, target: str) -> str:
     if provider == "google":
         return _translate_google(text, source, target)
+    if provider == "mymemory":
+        return _translate_mymemory(text, source, target)
     if provider == "chatgpt":
         return _translate_chatgpt(text, source, target)
     raise ValueError(f"Unsupported provider: {provider}")
@@ -93,19 +108,49 @@ def _compare_debug_enabled() -> bool:
     return os.getenv("TRANSLATION_COMPARE_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
+# A provider that answered "too many requests" is skipped for this long.
+RATE_LIMIT_COOLDOWN_SECONDS = 120
+_cooldown_until: Dict[str, float] = {}
+
+# Small in-memory cache: the same queries and product titles come up often.
+_CACHE_MAX = 2000
+_cache: Dict[Tuple[str, str, str], Tuple[str, str]] = {}
+
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "too many requests" in text or "429" in text or "quota" in text
+
+
 async def translate(text: str, source: str, target: str) -> Tuple[str, str]:
     """Translate with the preferred provider, falling back to the next one
-    only if it fails or returns an empty string.
+    only if it fails or returns an empty string. Providers that are
+    rate-limited are skipped for RATE_LIMIT_COOLDOWN_SECONDS.
     Returns (translated_text, provider); ("", "none") if all providers fail."""
+    text = _normalize_text(text)
+    if not text:
+        return "", "none"
+    key = (text, source, target)
+    if key in _cache:
+        return _cache[key]
+
     for provider in _provider_order():
+        if _cooldown_until.get(provider, 0) > time.monotonic():
+            continue
         try:
             translated = _normalize_text(
                 await asyncio.to_thread(_translate_with_provider, provider, text, source, target)
             )
         except Exception as e:
             print(f"Translation error ({provider}, {source}->{target}): {e}")
+            if _is_rate_limit_error(e):
+                _cooldown_until[provider] = time.monotonic() + RATE_LIMIT_COOLDOWN_SECONDS
+                print(f"Translation provider {provider} rate-limited, skipping it for {RATE_LIMIT_COOLDOWN_SECONDS}s")
             continue
         if translated:
+            if len(_cache) >= _CACHE_MAX:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = (translated, provider)
             return translated, provider
     return "", "none"
 
@@ -157,3 +202,22 @@ async def translate_to_hebrew(text: str):
     except Exception as e:
         print(f"Translation error (to Hebrew): {e}")
         return text
+
+
+async def translate_titles_to_hebrew(titles: list[str]) -> list[str]:
+    """Translate several titles with a single request (one per line) instead
+    of one request per title, which quickly hits Google's rate limit.
+    Falls back to one-by-one if the line count doesn't come back intact.
+    Untranslatable titles are returned unchanged."""
+    clean = [" ".join((t or "").split()) for t in titles]
+    if not clean:
+        return []
+    joined, _ = await translate("\n".join(clean), source="en", target="he")
+    lines = [line.strip() for line in joined.split("\n") if line.strip()] if joined else []
+    if len(lines) == len(clean):
+        return lines
+    results = []
+    for title in clean:
+        translated, _ = await translate(title, source="en", target="he")
+        results.append(translated or title)
+    return results

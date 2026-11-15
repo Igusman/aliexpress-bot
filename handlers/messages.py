@@ -1,11 +1,10 @@
-import asyncio
 import time
 import os
 from html import escape
 from urllib.parse import urlparse
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ContextTypes
-from services.translation import is_hebrew, translate_to_english_with_debug, translate_to_hebrew
+from services.translation import is_hebrew, translate_titles_to_hebrew, translate_to_english_with_debug
 from services.aliexpress_api import (
     compare_search_methods,
     enrich_products_with_details,
@@ -192,6 +191,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         force_query = False
     elif is_hebrew(text):
         translated_text, translation_provider, translation_comparison = await translate_to_english_with_debug(text)
+        if translation_provider == "none":
+            # Searching AliExpress with the raw Hebrew text returns random products.
+            print(f"Translation failed for query: {text}")
+            await update.message.reply_text(
+                "⚠️ שירות התרגום עמוס כרגע ולא הצלחתי לתרגם את החיפוש. "
+                "נסה שוב בעוד דקה, או כתוב את שם המוצר באנגלית."
+            )
+            return
     else:
         translated_text = text
 
@@ -269,8 +276,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filtered.append(annotate_product(p, keyword_words, hot_products_requested))
 
     if not filtered and not hot_products_requested:
-        await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג הצעות כלליות:")
-        fallback_ranked = [annotate_product(p, keyword_words, hot_products_requested) for p in products]
+        # Only products that match at least one search word; never random products.
+        fallback_ranked = [
+            p for p in (annotate_product(p, keyword_words, hot_products_requested) for p in products)
+            if p["__relevance"] > 0
+        ]
+        if not fallback_ranked:
+            await update.message.reply_text("❌ לא נמצאו מוצרים מתאימים לחיפוש. נסה לנסח אחרת.")
+            return
+        await update.message.reply_text("⚠️ לא נמצאו תוצאות מדויקות, מציג את התוצאות הקרובות ביותר:")
         filtered = rank_products(fallback_ranked, min_rating=0)[:10]
 
     # Enrich all current candidates first, then rank with the enriched metrics.
@@ -288,10 +302,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # search returned without promotion_link get one from link.generate.
     await ensure_affiliate_links(top5)
 
-    # Translate all titles concurrently instead of one after another.
-    translated_titles = await asyncio.gather(
-        *(translate_to_hebrew(p.get("__title", "")) for p in top5)
-    )
+    # Translate all titles in one request (separate requests hit Google's rate limit).
+    translated_titles = await translate_titles_to_hebrew([p.get("__title", "") for p in top5])
 
     media_group = []
     captions = []
