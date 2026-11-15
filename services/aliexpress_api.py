@@ -8,6 +8,9 @@ import re
 ALI_KEY = os.getenv("ALIEXPRESS_APP_KEY")
 ALI_SECRET = os.getenv("ALIEXPRESS_APP_SECRET")
 
+# Seconds to wait for any AliExpress API response.
+ALI_API_TIMEOUT = 15
+
 
 # Explicitly request all useful fields from the affiliate product query API,
 # including lastest_volume which is the only sales-count field the API returns.
@@ -193,7 +196,11 @@ def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
         **extra_params
     }
     params["sign"] = generate_signature(params, ALI_SECRET)
-    resp = requests.get("https://api-sg.aliexpress.com/sync", params=params)
+    try:
+        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
+    except requests.RequestException as e:
+        print(f"AliExpress API request error: {e}")
+        return {"error": str(e)}
     try:
         return resp.json()
     except Exception as e:
@@ -361,7 +368,7 @@ def _fetch_product_details_sync(product_ids: list[str]) -> dict[str, dict]:
     params["sign"] = generate_signature(params, ALI_SECRET)  # type: ignore[arg-type]
 
     try:
-        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=10)
+        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
         data = resp.json()
     except Exception as e:
         print(f"AliExpress detail API error: {e}")
