@@ -25,6 +25,15 @@ BUTTON_QUERY_MAP = {
 }
 
 
+CURRENCY_SYMBOLS = {"USD": "$", "ILS": "₪", "EUR": "€"}
+
+
+def format_price(price, currency: str | None) -> str:
+    code = (currency or os.getenv("ALI_TARGET_CURRENCY", "USD") or "USD").strip().upper()
+    symbol = CURRENCY_SYMBOLS.get(code)
+    return f"{price}{symbol}" if symbol else f"{price} {code}"
+
+
 def normalize_button_text(text: str) -> str:
     normalized = text.strip().lower()
     for token in ["🔥", "👟", "⌚", "📱"]:
@@ -289,7 +298,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         message_part = (
             f"{short_title}\n"
-            f"מחיר: {sale_price}$\n"
+            f"מחיר: {format_price(sale_price, p.get('target_sale_price_currency'))}\n"
             f"{metrics_line}\n"
             f"🔗 קישור למוצר"
         )
