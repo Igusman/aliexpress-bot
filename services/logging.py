@@ -4,21 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from services.aliexpress_api import find_products_in_response
+
 SEARCH_LOG_FILE = "search_log.txt"
-
-
-def find_products_in_response(data):
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for _, value in data.items():
-            if isinstance(value, list):
-                return value
-            if isinstance(value, dict):
-                nested = find_products_in_response(value)
-                if nested:
-                    return nested
-    return []
 
 
 def extract_key_data(api_data: dict, limit: int = 5):
