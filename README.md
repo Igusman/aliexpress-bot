@@ -42,6 +42,13 @@ ALI_TRACKING_ID=...
 python main.py
 ```
 
+## בדיקות
+
+```bash
+pip install pytest
+python -m pytest tests
+```
+
 ## פריסה ל-Railway
 
 הפרויקט מוגדר כבר דרך `railway.json` ו-`Procfile` (worker שמריץ `python main.py`):
