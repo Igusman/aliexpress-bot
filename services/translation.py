@@ -83,7 +83,32 @@ def _translate_with_provider(provider: str, text: str, source: str, target: str)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
+def _provider_order() -> list:
+    preferred = os.getenv("TRANSLATION_PROVIDER", PREFERRED_PROVIDER).strip().lower()
+    return [preferred] + [p for p in PROVIDER_ORDER if p != preferred]
+
+
+def _compare_debug_enabled() -> bool:
+    return os.getenv("TRANSLATION_COMPARE_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def translate(text: str, source: str, target: str) -> Tuple[str, str]:
+    """Translate with the preferred provider, falling back to the next one
+    only if it fails or returns an empty string.
+    Returns (translated_text, provider); ("", "none") if all providers fail."""
+    for provider in _provider_order():
+        try:
+            translated = _normalize_text(_translate_with_provider(provider, text, source, target))
+        except Exception as e:
+            print(f"Translation error ({provider}, {source}->{target}): {e}")
+            continue
+        if translated:
+            return translated, provider
+    return "", "none"
+
+
 async def compare_translations(text: str, source: str = "he", target: str = "en") -> Dict[str, Dict[str, str]]:
+    """Run every provider on the same text. Debug only (TRANSLATION_COMPARE_DEBUG=1)."""
     results: Dict[str, Dict[str, str]] = {}
     for provider in PROVIDER_ORDER:
         try:
@@ -101,22 +126,11 @@ async def compare_translations(text: str, source: str = "he", target: str = "en"
     return results
 
 
-def _pick_provider(comparison: Dict[str, Dict[str, str]]) -> Tuple[str, str]:
-    preferred = os.getenv("TRANSLATION_PROVIDER", PREFERRED_PROVIDER).strip().lower()
-    ordered = [preferred] + [p for p in PROVIDER_ORDER if p != preferred]
-
-    for provider in ordered:
-        info = comparison.get(provider, {})
-        translated = _normalize_text(info.get("translated_text", ""))
-        if info.get("status") == "ok" and translated:
-            return translated, provider
-
-    return "", "none"
-
-
 async def translate_to_english_with_debug(text: str) -> Tuple[str, str, Dict[str, Dict[str, str]]]:
-    comparison = await compare_translations(text, source="he", target="en")
-    selected_text, provider = _pick_provider(comparison)
+    comparison: Dict[str, Dict[str, str]] = {}
+    if _compare_debug_enabled():
+        comparison = await compare_translations(text, source="he", target="en")
+    selected_text, provider = await translate(text, source="he", target="en")
     if not selected_text:
         selected_text = text
     return selected_text, provider, comparison
@@ -124,16 +138,16 @@ async def translate_to_english_with_debug(text: str) -> Tuple[str, str, Dict[str
 
 async def translate_to_english(text: str):
     try:
-        translated_text, _, _ = await translate_to_english_with_debug(text)
-        return translated_text
+        translated_text, _ = await translate(text, source="he", target="en")
+        return translated_text or text
     except Exception as e:
         print(f"Translation error (to English): {e}")
         return text
 
+
 async def translate_to_hebrew(text: str):
     try:
-        comparison = await compare_translations(text, source="en", target="he")
-        translated_text, _ = _pick_provider(comparison)
+        translated_text, _ = await translate(text, source="en", target="he")
         return translated_text or text
     except Exception as e:
         print(f"Translation error (to Hebrew): {e}")
