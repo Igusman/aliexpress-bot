@@ -43,6 +43,17 @@ _PRODUCT_FIELDS = ",".join([
 ])
 
 
+def _add_tracking_id(params: dict) -> dict:
+    """Attach the affiliate tracking ID (ALI_TRACKING_ID) if configured.
+    tracking_id is an optional request parameter on product.query,
+    product.smartmatch, hotproduct.query and productdetail.get; it ties the
+    returned promotion_link to the affiliate account."""
+    tracking_id = os.getenv("ALI_TRACKING_ID", "").strip()
+    if tracking_id:
+        params["tracking_id"] = tracking_id
+    return params
+
+
 def build_product_query_params(
     keywords: str,
     page_no: int = 1,
@@ -74,7 +85,7 @@ def build_product_query_params(
     if category_ids:
         params["category_ids"] = category_ids
 
-    return params
+    return _add_tracking_id(params)
 
 
 def build_product_smartmatch_params(
@@ -122,7 +133,7 @@ def build_hotproduct_query_params(
     if keywords:
         params["keywords"] = keywords
 
-    return params
+    return _add_tracking_id(params)
 
 
 def _to_bool(value: str | None) -> bool:
@@ -365,6 +376,7 @@ def _fetch_product_details_sync(product_ids: list[str]) -> dict[str, dict]:
         "target_currency": os.getenv("ALI_TARGET_CURRENCY", "USD"),
         "target_language": os.getenv("ALI_TARGET_LANGUAGE", "EN"),
     }
+    _add_tracking_id(params)
     params["sign"] = generate_signature(params, ALI_SECRET)  # type: ignore[arg-type]
 
     try:
