@@ -11,6 +11,7 @@ from services.aliexpress_api import (
     enrich_products_with_details,
     fetch_hot_products,
     find_products_in_response,
+    get_api_error,
     pick_best_count,
     pick_best_rate,
     search_products_with_fallback,
@@ -218,7 +219,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     products = find_products_in_response(data)
     if not products:
-        await update.message.reply_text("❌ לא נמצאו מוצרים.")
+        api_error = get_api_error(data)
+        if api_error:
+            print(f"ALI_API_ERROR ({search_method}): {api_error}")
+        if api_error and ("error_response" in data or "error" in data):
+            # The request itself failed (bad keys/signature, network...), not an empty result.
+            await update.message.reply_text("⚠️ שגיאה בחיבור ל-AliExpress. נסה שוב בעוד כמה דקות.")
+        else:
+            await update.message.reply_text("❌ לא נמצאו מוצרים.")
         return
 
     filtered = []

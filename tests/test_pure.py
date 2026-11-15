@@ -103,3 +103,34 @@ def test_chunk_html_messages_joins_until_limit():
 def test_chunk_html_messages_truncates_oversized_part():
     assert chunk_html_messages(["x" * 12, "y"], limit=5) == ["xxxxx", "y"]
     assert chunk_html_messages([]) == []
+
+
+# find_products_in_response / get_api_error
+
+from services.aliexpress_api import find_products_in_response, get_api_error  # noqa: E402
+
+OK_RESPONSE = {
+    "aliexpress_affiliate_product_query_response": {
+        "resp_result": {
+            "resp_code": 200,
+            "resp_msg": "Call succeeds",
+            "result": {"current_record_count": 1, "products": {"product": [{"product_id": 1}]}},
+        },
+        "request_id": "abc",
+    }
+}
+
+
+def test_find_products_known_path():
+    assert find_products_in_response(OK_RESPONSE) == [{"product_id": 1}]
+    assert get_api_error(OK_RESPONSE) is None
+
+
+def test_get_api_error_variants():
+    gateway = {"error_response": {"code": "IncompleteSignature", "msg": "bad sign", "request_id": "1"}}
+    assert find_products_in_response(gateway) is None
+    assert "IncompleteSignature" in get_api_error(gateway)
+    empty = {"x_response": {"resp_result": {"resp_code": 405, "resp_msg": "The result is empty"}}}
+    assert get_api_error(empty) == "resp_code 405: The result is empty"
+    assert get_api_error({"error": "timeout"}) == "timeout"
+    assert get_api_error({}) == "empty response"

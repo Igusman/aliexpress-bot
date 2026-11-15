@@ -436,12 +436,61 @@ async def enrich_products_with_details(products: list[dict]) -> list[dict]:
     return products
 
 
-def find_products_in_response(data):
-    if isinstance(data, list): return data
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(value, list): return value
-            elif isinstance(value, dict):
-                result = find_products_in_response(value)
-                if result: return result
+def get_api_error(data) -> str | None:
+    """Return a readable error if the API call failed, else None.
+
+    Covers local failures ({"error": ...}), gateway errors
+    ({"error_response": {...}}, e.g. bad signature/timestamp/app key) and
+    resp_result with resp_code != 200."""
+    if not data:
+        return "empty response"
+    if not isinstance(data, dict):
+        return None
+    if data.get("error"):
+        return str(data["error"])
+    err = data.get("error_response")
+    if isinstance(err, dict):
+        parts = [str(err.get(k)) for k in ("code", "msg", "sub_code", "sub_msg") if err.get(k)]
+        return "error_response: " + " | ".join(parts) if parts else f"error_response: {err}"
+    for value in data.values():
+        if isinstance(value, dict) and isinstance(value.get("resp_result"), dict):
+            resp = value["resp_result"]
+            code = resp.get("resp_code")
+            if code is not None and str(code) != "200":
+                return f"resp_code {code}: {resp.get('resp_msg', '')}"
     return None
+
+
+def _find_any_list(data):
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for value in data.values():
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                result = _find_any_list(value)
+                if result:
+                    return result
+    return None
+
+
+def find_products_in_response(data):
+    """Return the product list from an affiliate API response, or None.
+
+    Looks at the documented path first:
+    <method>_response.resp_result.result.products.product
+    and only falls back to the first list found anywhere."""
+    if isinstance(data, dict):
+        for value in data.values():
+            if not isinstance(value, dict):
+                continue
+            try:
+                products = value["resp_result"]["result"]["products"]
+            except (KeyError, TypeError):
+                continue
+            if isinstance(products, dict):
+                products = products.get("product")
+            if isinstance(products, list):
+                return products
+    return _find_any_list(data)
