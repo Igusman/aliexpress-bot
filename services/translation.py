@@ -110,6 +110,10 @@ def _compare_debug_enabled() -> bool:
 
 # A provider that answered "too many requests" is skipped for this long.
 RATE_LIMIT_COOLDOWN_SECONDS = 120
+
+# deep-translator sends its HTTP requests without a timeout, so a stuck
+# request could hang a search forever. Give up on a provider after this long.
+PROVIDER_TIMEOUT_SECONDS = 8
 _cooldown_until: Dict[str, float] = {}
 
 # Small in-memory cache: the same queries and product titles come up often.
@@ -139,8 +143,14 @@ async def translate(text: str, source: str, target: str) -> Tuple[str, str]:
             continue
         try:
             translated = _normalize_text(
-                await asyncio.to_thread(_translate_with_provider, provider, text, source, target)
+                await asyncio.wait_for(
+                    asyncio.to_thread(_translate_with_provider, provider, text, source, target),
+                    timeout=PROVIDER_TIMEOUT_SECONDS,
+                )
             )
+        except asyncio.TimeoutError:
+            print(f"Translation timeout ({provider}, {source}->{target}) after {PROVIDER_TIMEOUT_SECONDS}s")
+            continue
         except Exception as e:
             print(f"Translation error ({provider}, {source}->{target}): {e}")
             if _is_rate_limit_error(e):
