@@ -1,3 +1,6 @@
+import asyncio
+import json
+import re
 import time
 import os
 from html import escape
@@ -162,8 +165,49 @@ def chunk_html_messages(parts: list[str], limit: int = 4096) -> list[str]:
 
     return chunks
 
+class StageTimer:
+    """Measures how long each stage of a search takes; logged as one TIMING line."""
+
+    def __init__(self):
+        self.start = self.last = time.monotonic()
+        self.stages: dict[str, float] = {}
+
+    def mark(self, stage: str) -> None:
+        now = time.monotonic()
+        self.stages[stage] = round(now - self.last, 2)
+        self.last = now
+
+    def log(self, query: str) -> None:
+        total = round(time.monotonic() - self.start, 2)
+        print("TIMING:", json.dumps({"query": query, **self.stages, "total": total}, ensure_ascii=False))
+
+
+_SIZE_SUFFIX = re.compile(r"_\d+x\d+", re.IGNORECASE)
+
+
+def small_image_url(url: str) -> str:
+    """AliExpress CDN images accept a size suffix (e.g. ..._350x350.jpg).
+    Telegram downloads every album image itself, so smaller images mean a
+    faster album. Only applied to plain .jpg/.jpeg URLs on alicdn.com."""
+    if not url:
+        return url
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    if "alicdn.com" in (parsed.netloc or "") and path.endswith((".jpg", ".jpeg")) \
+            and not _SIZE_SUFFIX.search(path) and not parsed.query:
+        return url + "_350x350.jpg"
+    return url
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    start_time = time.time()
+    timer = StageTimer()
+    try:
+        await _handle_message(update, context, timer)
+    finally:
+        timer.log(update.message.text.strip() if update.message and update.message.text else "")
+
+
+async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, timer: StageTimer):
     text = update.message.text.strip()
     chat_id = update.message.chat.id
 
@@ -172,11 +216,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     button_query_config = BUTTON_QUERY_MAP.get(normalized_text)
 
     if hot_products_requested:
-        await update.message.reply_text("🔥 מביא לך עכשיו מוצרים חמים מ-AliExpress...")
+        ack_text = "🔥 מביא לך עכשיו מוצרים חמים מ-AliExpress..."
     elif button_query_config:
-        await update.message.reply_text(f"🔥 מביא עכשיו מוצרים חמים עבור: {normalized_text}")
+        ack_text = f"🔥 מביא עכשיו מוצרים חמים עבור: {normalized_text}"
     else:
-        await update.message.reply_text(f"🔍 מחפש את '{text}' באלי אקספרס...")
+        ack_text = f"🔍 מחפש את '{text}' באלי אקספרס..."
+    # Send the "searching..." message while translating/searching, not before.
+    # It is awaited before any other message so the order stays the same.
+    ack = asyncio.create_task(update.message.reply_text(ack_text))
 
     translation_provider = "original"
     translation_comparison = {}
@@ -191,7 +238,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         force_query = False
     elif is_hebrew(text):
         translated_text, translation_provider, translation_comparison = await translate_to_english_with_debug(text)
+        timer.mark("translate_query")
         if translation_provider == "none":
+            await ack
             # Searching AliExpress with the raw Hebrew text returns random products.
             print(f"Translation failed for query: {text}")
             await update.message.reply_text(
@@ -242,6 +291,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             force_query=force_query,
         )
     print(f"ALI_SEARCH_METHOD: {search_method}")
+    timer.mark("search")
+    await ack
 
     # Keep a full per-search log (original query + translation + raw API response)
     log_search(
@@ -290,6 +341,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Enrich all current candidates first, then rank with the enriched metrics.
     # This avoids picking an arbitrary top-5 when initial API response has zeros/nulls.
     enriched_candidates = await enrich_products_with_details(filtered)
+    timer.mark("enrich")
 
     # Re-apply metric extraction after enrichment
     for p in enriched_candidates:
@@ -298,14 +350,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Most relevant first, then best combination of rating, sales and discount.
     top5 = rank_products(enriched_candidates)[:5]
 
-    # Every product should link through the affiliate account. Products the
-    # search returned without promotion_link get one from link.generate.
-    await ensure_affiliate_links(top5)
+    # Both at once:
+    # - every product should link through the affiliate account; products the
+    #   search returned without promotion_link get one from link.generate;
+    # - all titles are translated in one request (separate requests hit
+    #   Google's rate limit).
+    _, translated_titles = await asyncio.gather(
+        ensure_affiliate_links(top5),
+        translate_titles_to_hebrew([p.get("__title", "") for p in top5]),
+    )
+    timer.mark("links_and_titles")
 
-    # Translate all titles in one request (separate requests hit Google's rate limit).
-    translated_titles = await translate_titles_to_hebrew([p.get("__title", "") for p in top5])
-
-    media_group = []
+    images = []
     captions = []
     for p, translated_title in zip(top5, translated_titles):
         title = p.get("__title", "")
@@ -334,13 +390,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         captions.append((message_part, link))
         if image:
-            media_group.append(InputMediaPhoto(media=image, caption=short_title))
+            images.append((image, short_title))
 
-    if media_group:
+    if images:
         try:
-            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+            await context.bot.send_media_group(
+                chat_id=chat_id,
+                media=[InputMediaPhoto(media=small_image_url(img), caption=cap) for img, cap in images],
+            )
         except Exception as e:
-            print("שגיאה באלבום:", e)
+            print("שגיאה באלבום (תמונות מוקטנות), מנסה עם התמונות המקוריות:", e)
+            try:
+                await context.bot.send_media_group(
+                    chat_id=chat_id,
+                    media=[InputMediaPhoto(media=img, caption=cap) for img, cap in images],
+                )
+            except Exception as e2:
+                print("שגיאה באלבום:", e2)
+        timer.mark("album")
 
     html_parts = []
     for part, link in captions:
@@ -361,4 +428,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("שגיאה בשליחת הודעת קישורים:", e)
         plain_text = message_html.replace("<a href=\"", "").replace("\">קישור למוצר</a>", "קישור למוצר")
         await update.message.reply_text(plain_text, disable_web_page_preview=True)
-    print("⏱️ זמן טיפול:", f"{time.time() - start_time:.2f} שניות")
+    timer.mark("text_message")
