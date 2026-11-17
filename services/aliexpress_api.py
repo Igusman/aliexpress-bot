@@ -462,6 +462,11 @@ async def enrich_products_with_details(products: list[dict]) -> list[dict]:
     if not missing_ids:
         return products
 
+    # Enough products already have sales data to pick a top 5: skip the extra
+    # productdetail.get round trip.
+    if len(products) - len(missing_ids) >= 5:
+        return products
+
     loop = asyncio.get_running_loop()
     # Up to 20 IDs per productdetail.get call, batches run concurrently.
     batches = [missing_ids[i:i + 20] for i in range(0, len(missing_ids), 20)]
