@@ -11,6 +11,11 @@ ALI_SECRET = os.getenv("ALIEXPRESS_APP_SECRET")
 # Seconds to wait for any AliExpress API response.
 ALI_API_TIMEOUT = 15
 
+# One shared session: keeps the TLS connection to api-sg.aliexpress.com
+# open between calls instead of a new handshake for every request.
+_session = requests.Session()
+_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=20))
+
 
 # Explicitly request all useful fields from the affiliate product query API,
 # including lastest_volume which is the only sales-count field the API returns.
@@ -215,7 +220,7 @@ def call_aliexpress_sync_api_sync(method: str, extra_params: dict):
     }
     params["sign"] = generate_signature(params, ALI_SECRET)
     try:
-        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
+        resp = _session.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
     except requests.RequestException as e:
         print(f"AliExpress API request error: {e}")
         return {"error": str(e)}
@@ -274,15 +279,14 @@ async def search_products_with_fallback(
         query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
         return query_data, "aliexpress.affiliate.product.query"
 
-    smartmatch_data = await call_aliexpress_sync_api(
-        "aliexpress.affiliate.product.smartmatch",
-        smartmatch_params,
+    # hybrid: run both at once (instead of query only after smartmatch came
+    # back empty, which doubled the wait), prefer smartmatch when it has results.
+    smartmatch_data, query_data = await asyncio.gather(
+        call_aliexpress_sync_api("aliexpress.affiliate.product.smartmatch", smartmatch_params),
+        call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params),
     )
-    smartmatch_products = find_products_in_response(smartmatch_data) or []
-    if smartmatch_products:
+    if find_products_in_response(smartmatch_data):
         return smartmatch_data, "aliexpress.affiliate.product.smartmatch"
-
-    query_data = await call_aliexpress_sync_api("aliexpress.affiliate.product.query", query_params)
     return query_data, "aliexpress.affiliate.product.query"
 
 
@@ -428,7 +432,7 @@ def _fetch_product_details_sync(product_ids: list[str]) -> dict[str, dict]:
     params["sign"] = generate_signature(params, ALI_SECRET)  # type: ignore[arg-type]
 
     try:
-        resp = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
+        resp = _session.get("https://api-sg.aliexpress.com/sync", params=params, timeout=ALI_API_TIMEOUT)
         data = resp.json()
     except Exception as e:
         print(f"AliExpress detail API error: {e}")
